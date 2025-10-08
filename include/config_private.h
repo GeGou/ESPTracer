@@ -17,6 +17,7 @@
 #define GPRS_USER ""
 #define GPRS_PASS ""
 #define APN "internet"
+#define GSM_PIN "" // SIM card PIN (if any)
 
 // BLE Key Fob
 #define ITAG_MAC_ADDRESS "ff:ff:c2:11:ec:17" // iTag's MAC address

@@ -5,11 +5,23 @@
 #pragma once
 #include <Arduino.h>
 
+
 // --- Board identification ---
 #define PRODUCT_MODEL_NAME "LilyGo T-SIM7000G"
 #define TINY_GSM_MODEM_SIM7000SSL   // TinyGSM driver
+#define TINY_GSM_RX_BUFFER 1024 // Set RX buffer to 1K
+
+#include <TinyGsmClient.h>
+#include <PubSubClient.h>
+#include <TinyGPSPlus.h>
+
+extern TinyGsm modem;
+extern TinyGsmClient client;
+extern PubSubClient mqttClient;
+extern TinyGPSPlus gps;
 
 // --- Modem pins ---
+#define UART_BAUD        115200
 #define MODEM_TX_PIN     27
 #define MODEM_RX_PIN     26
 #define MODEM_PWRKEY_PIN 4
@@ -22,7 +34,7 @@
 #define LED_ON           LOW
 
 // --- Motion sensor pin (Wake pin) ---
-#define MOTION_INT_PIN   34   // συνδέεις το INT από MPU6050 ή ADXL345 εδώ
+#define MOTION_INT_PIN   32   // συνδέεις το INT από MPU6050 ή ADXL345 εδώ
 
 // --- SD card SPI ---
 #define BOARD_MISO_PIN   2
@@ -40,20 +52,4 @@
 // Helper: start the modem UART
 inline void setupModemSerial(uint32_t baud = 115200) {
     SerialAT.begin(baud, SERIAL_8N1, MODEM_RX_PIN, MODEM_TX_PIN);
-}
-
-// Helper: power on modem (simple PWRKEY pulse)
-inline void powerOnModem() {
-    pinMode(MODEM_PWRKEY_PIN, OUTPUT);
-    digitalWrite(MODEM_PWRKEY_PIN, LOW);
-    delay(100);
-    digitalWrite(MODEM_PWRKEY_PIN, HIGH);
-    delay(1000);
-    digitalWrite(MODEM_PWRKEY_PIN, LOW);
-}
-
-// Optional: enable GPS
-inline void enableGPS(bool on = true) {
-    pinMode(MODEM_GPS_EN_PIN, OUTPUT);
-    digitalWrite(MODEM_GPS_EN_PIN, on ? MODEM_GPS_EN_LEVEL : !MODEM_GPS_EN_LEVEL);
 }
