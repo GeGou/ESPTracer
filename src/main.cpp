@@ -2,7 +2,7 @@
 // Modules: ESP32, SIM800L (GSM), MPU6050, BLE (for key fob detection)
 
 #include <Arduino.h>
-#include "config_private.h"
+#include "config.h"
 #include "utilities.h"
 #include "GPSManager.h"
 #include "modemManager.h"
@@ -29,7 +29,7 @@ bool tagFound = false;
 unsigned long sendInterval = 10000; // κάθε 10s
 unsigned long lastSend = 0;
 unsigned long lastMotion = 0;
-const unsigned long motionTimeout = 60 * 1000UL; // 1 λεπτό
+const unsigned long motionTimeout = 5 * 60 * 1000UL; // 5 λεπτά
 
 // ------------------------------------------------------
 
@@ -84,7 +84,7 @@ void sendTagStatus(bool found) {
 
 void setup() {
   Serial.begin(115200);
-  delay(200);
+  delay(10);
   Serial.println("🚗 ESP32 Crash Wake Tracker starting...");
 
   // Αν ΞΥΠΝΗΣΕ από motion
@@ -98,12 +98,12 @@ void setup() {
   pinMode(BOARD_LED_PIN, OUTPUT);
   digitalWrite(BOARD_LED_PIN, HIGH);
 
-  // setupModemSerial();
-  SerialAT.begin(UART_BAUD, SERIAL_8N1, MODEM_RX_PIN, MODEM_TX_PIN);
-
-  delay(10000); // Wait for serial to initialize
   // Init modem
   modemPowerOn();
+
+  // setupModemSerial();
+  SerialAT.begin(UART_BAUD, SERIAL_8N1, MODEM_RX_PIN, MODEM_TX_PIN);
+  delay(10000); // Wait for serial to initialize
 
   Serial.println("Initializing modem...");
   if (!modem.init()) {
@@ -158,7 +158,8 @@ void setup() {
   }
   
   // Enable GPS
-  enableGPS();
+  GPSTurnOn();
+  delay(1000);
 
   // Connect MQTT
   connectToMQTT();
@@ -179,12 +180,40 @@ void loop() {
   sendTagStatus(tagFound);
 
   // === GPS ===
-  while (SerialAT.available()) {
-    gps.encode(SerialAT.read());
-  }
-  if (gps.location.isUpdated() && millis() - lastSend > sendInterval) {
-    lastSend = millis();
-    sendLocation(gps.location.lat(), gps.location.lng());
+  delay(3000);
+  float lat      = 0;
+  float lon      = 0;
+  float speed    = 0;
+  float alt     = 0;
+  int   vsat     = 0;
+  int   usat     = 0;
+  float accuracy = 0;
+  int   year     = 0;
+  int   month    = 0;
+  int   day      = 0;
+  int   hour     = 0;
+  int   min      = 0;
+  int   sec      = 0;
+  
+  for (int8_t i = 15; i; i--) {
+    Serial.println("Requesting current GPS/GNSS/GLONASS location");
+    if (modem.getGPS(&lat, &lon, &speed, &alt, &vsat, &usat, &accuracy,
+        &year, &month, &day, &hour, &min, &sec)) {
+      // Print data
+      /* Serial.println("Latitude: " + String(lat, 8) + "\tLongitude: " + String(lon, 8));
+      Serial.println("Speed: " + String(speed) + "\tAltitude: " + String(alt));
+      Serial.println("Visible Satellites: " + String(vsat) + "\tUsed Satellites: " + String(usat));
+      Serial.println("Accuracy: " + String(accuracy));
+      Serial.println("Year: " + String(year) + "\tMonth: " + String(month) + "\tDay: " + String(day));
+      Serial.println("Hour: " + String(hour) + "\tMinute: " + String(min) + "\tSecond: " + String(sec)); */
+      // Send to MQTT
+      sendLocation(lat, lon);
+      break;
+    } 
+    else {
+      Serial.println("Couldn't get GPS/GNSS/GLONASS location, retrying in 15s.");
+      delay(15000L);
+    }
   }
 
   // === Check inactivity ===
@@ -192,7 +221,8 @@ void loop() {
     Serial.println("🛑 No motion – going to sleep...");
 
     modem.gprsDisconnect();
-    disableGPS();
+    GPSTurnOff();
+    modemPowerOff();
 
     // Prepare for wake on crash (motion sensor)
     esp_sleep_enable_ext0_wakeup(GPIO_NUM_32, 1);

@@ -3,9 +3,9 @@
 
 void modemPowerOn(){
   pinMode(MODEM_PWRKEY_PIN, OUTPUT);
-  digitalWrite(MODEM_PWRKEY_PIN, LOW);
-  delay(1000);
   digitalWrite(MODEM_PWRKEY_PIN, HIGH);
+  delay(1000);
+  digitalWrite(MODEM_PWRKEY_PIN, LOW);
 }
 
 void modemPowerOff(){
@@ -14,7 +14,6 @@ void modemPowerOff(){
   delay(1500);
   digitalWrite(MODEM_PWRKEY_PIN, HIGH);
 }
-
 
 void modemRestart(){
   modemPowerOff();

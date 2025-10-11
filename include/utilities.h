@@ -5,11 +5,13 @@
 #pragma once
 #include <Arduino.h>
 
-
 // --- Board identification ---
 #define PRODUCT_MODEL_NAME "LilyGo T-SIM7000G"
-#define TINY_GSM_MODEM_SIM7000SSL   // TinyGSM driver
+#define TINY_GSM_MODEM_SIM7000 // Modem is SIM7000
 #define TINY_GSM_RX_BUFFER 1024 // Set RX buffer to 1K
+
+// --- Serial for modem ---
+#define SerialAT Serial1
 
 #include <TinyGsmClient.h>
 #include <PubSubClient.h>
@@ -45,9 +47,6 @@ extern TinyGPSPlus gps;
 // --- Battery / Solar monitoring ---
 #define BOARD_BAT_ADC_PIN   35
 #define BOARD_SOLAR_ADC_PIN 36
-
-// --- Serial for modem ---
-#define SerialAT Serial1
 
 // Helper: start the modem UART
 inline void setupModemSerial(uint32_t baud = 115200) {

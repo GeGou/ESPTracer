@@ -1,5 +1,5 @@
 #pragma once
 
-void enableGPS(void);
-void disableGPS(void);
+void GPSTurnOn(void);
+void GPSTurnOff(void);
 void sendCoords(float lat, float lon);
