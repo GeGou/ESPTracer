@@ -6,6 +6,7 @@
 #include "utilities.h"
 #include "GPSManager.h"
 #include "modemManager.h"
+#include "batteryManager.h"
 // #include "MPU6050.h"
 #include <BLEDevice.h>
 
@@ -56,9 +57,9 @@ void connectToMQTT() {
         Serial.println("Connection to MQTT Broker ...");
         if (mqttClient.connect("ESP32Client", MQTT_USERNAME, MQTT_PASSWORD)) {
             Serial.println("Connected to MQTT broker");
-            // mqttClient.subscribe(MQTT_TOPIC_GPS);  // Subscribe to topic
             mqttClient.subscribe(MQTT_TOPIC_TAG);
             mqttClient.subscribe(MQTT_TOPIC_LOC);
+            mqttClient.subscribe(MQTT_TOPIC_BAT);
         } else {
             Serial.print("Failed to connect to MQTT broker. Error: ");
             Serial.println(mqttClient.state());
@@ -68,7 +69,7 @@ void connectToMQTT() {
 }
 
 void sendLocation(float lat, float lng) {
-  String payload = "{\"lat\":" + String(lat, 6) + ",\"lng\":" + String(lng, 6) + "}";
+  String payload = "{\"latitude\":" + String(lat, 6) + ",\"longitude\":" + String(lng, 6) + "}";
   mqttClient.publish(MQTT_TOPIC_LOC, payload.c_str());
   Serial.println("📡 Sent: " + payload);
 }
@@ -77,6 +78,15 @@ void sendTagStatus(bool found) {
   String payload = "{\"status\":\"" + String(found ? "found" : "not_found") + "\"}";
   mqttClient.publish(MQTT_TOPIC_TAG, payload.c_str());
   Serial.println("🔵 BLE tag: " + String(found ? "found" : "not_found"));
+}
+
+void sendBatteryStatus() {
+  float voltage = ReadBatteryVoltage();
+  int percent = BatteryPercent(voltage);
+
+  String payload = "{\"battery\": " + String(voltage, 2) + ", \"batteryLevel\": " + String(percent) + "}";
+  mqttClient.publish(MQTT_TOPIC_BAT, payload.c_str());
+  Serial.println("Battery voltage: " + String(voltage, 2) + " V (" + String(percent) + "%)");    
 }
 
 // ------------------------------------------------------
@@ -163,6 +173,10 @@ void setup() {
 
   // Connect MQTT
   connectToMQTT();
+  delay(1000);
+
+  // Battery status every time esp boots
+  sendBatteryStatus();
 
   lastMotion = millis();
 }
@@ -181,19 +195,8 @@ void loop() {
 
   // === GPS ===
   delay(3000);
-  float lat      = 0;
-  float lon      = 0;
-  float speed    = 0;
-  float alt     = 0;
-  int   vsat     = 0;
-  int   usat     = 0;
-  float accuracy = 0;
-  int   year     = 0;
-  int   month    = 0;
-  int   day      = 0;
-  int   hour     = 0;
-  int   min      = 0;
-  int   sec      = 0;
+  float lat=0, lon=0, speed=0, alt=0, accuracy=0;
+  int   vsat=0, usat=0, year=0, month=0, day=0, hour=0, min=0, sec=0;
   
   for (int8_t i = 15; i; i--) {
     Serial.println("Requesting current GPS/GNSS/GLONASS location");
@@ -206,7 +209,8 @@ void loop() {
       Serial.println("Accuracy: " + String(accuracy));
       Serial.println("Year: " + String(year) + "\tMonth: " + String(month) + "\tDay: " + String(day));
       Serial.println("Hour: " + String(hour) + "\tMinute: " + String(min) + "\tSecond: " + String(sec)); */
-      // Send to MQTT
+      
+      // Send over MQTT
       sendLocation(lat, lon);
       break;
     } 
@@ -224,8 +228,8 @@ void loop() {
     GPSTurnOff();
     modemPowerOff();
 
-    // Prepare for wake on crash (motion sensor)
-    esp_sleep_enable_ext0_wakeup(GPIO_NUM_32, 1);
+    // Prepare for wake on motion (SW-420 sensor, etc.)
+    esp_sleep_enable_ext0_wakeup(GPIO_NUM_32, 1); // modify pin as needed
     delay(100);
     esp_deep_sleep_start();
   }

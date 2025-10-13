@@ -47,6 +47,10 @@ extern TinyGPSPlus gps;
 // --- Battery / Solar monitoring ---
 #define BOARD_BAT_ADC_PIN   35
 #define BOARD_SOLAR_ADC_PIN 36
+#define ADC_ATTEN ADC_11db  // ADC attenuation
+#define VOLTAGE_DIVIDER 2.0 // Divider R1=R2=100k
+#define ADC_RES 12          // ADC resolution
+
 
 // Helper: start the modem UART
 inline void setupModemSerial(uint32_t baud = 115200) {
