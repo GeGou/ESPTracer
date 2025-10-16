@@ -31,13 +31,23 @@ void checkModemStatus() {
   Serial.println(modem.getSignalQuality());
 }
 
+void GPSTurnOn(void) {
+  Serial.println("Start positioning . Make sure to locate outdoors.");
+  // Enable the power to GPS
+  modem.sendAT("+SGPIO=0,4,1,1");
+  if (modem.waitResponse(10000L) != 1) {
+    Serial.println(" SGPIO=0,4,1,1 false ");
+  }
+  // Enable GPS
+  modem.enableGPS();
+}
 
-// // Helper: power on modem (simple PWRKEY pulse)
-// inline void modemPowerOn() {
-//     pinMode(MODEM_PWRKEY_PIN, OUTPUT);
-//     digitalWrite(MODEM_PWRKEY_PIN, LOW);
-//     delay(100);
-//     digitalWrite(MODEM_PWRKEY_PIN, HIGH);
-//     delay(1000);
-//     digitalWrite(MODEM_PWRKEY_PIN, LOW);
-// }
+void GPSTurnOff(void) {
+  // Disable GPS
+  modem.disableGPS();
+  // Disable the power to GPS
+  modem.sendAT("+SGPIO=0,4,1,0");
+  if (modem.waitResponse(10000L) != 1) {
+    Serial.println(" SGPIO=0,4,1,0 false ");
+  }
+}

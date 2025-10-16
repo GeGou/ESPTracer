@@ -1,12 +1,10 @@
-// Arduino-based GPS + BLE Fob + Motion + MQTT tracker
-// Modules: ESP32, SIM800L (GSM), MPU6050, BLE (for key fob detection)
+// ESP-based GPS + BLE Key Fob + Motion Sensor + MQTT tracker
+// Modules: LilyGo SIM7000G, SW-420, MPU6050, BLE (for key fob detection)
 
 #include <Arduino.h>
 #include "config.h"
 #include "utilities.h"
-#include "GPSManager.h"
 #include "modemManager.h"
-#include "batteryManager.h"
 // #include "MPU6050.h"
 #include <BLEDevice.h>
 
@@ -14,11 +12,10 @@
 TinyGsm modem(SerialAT);
 TinyGsmClient client(modem);
 PubSubClient mqttClient(client);
-TinyGPSPlus gps;
 
-// BLE Key Fob
+// ==== BLE Key Fob ====
 BLEScan* pBLEScan;
-bool tagFound = false;
+bool keyFobFound = false;
 
 // ==== MPU6050 ====
 // MPU6050 mpu;
@@ -32,52 +29,46 @@ unsigned long lastSend = 0;
 unsigned long lastMotion = 0;
 const unsigned long motionTimeout = 5 * 60 * 1000UL; // 5 λεπτά
 
+bool firstBoot = true;
+
+// --- FUNCTIONS ---
+float ReadBatteryVoltage();
+int BatteryPercent(float voltage);
+
 // ------------------------------------------------------
 
-// bool connectMQTT() {
-//   mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
-//   Serial.print("Connecting to MQTT...");
-//   for (int i = 0; i < 5; i++) {
-//     if (mqttClient.connect("ESP32Tracker")) {
-//       Serial.println("connected!");
-//       return true;
-//     }
-//     delay(2000);
-//   }
-//   Serial.println("MQTT connection failed");
-//   return false;
-// }
-
 void connectToMQTT() {
-    mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
-    // mqttClient.setCallback(callback);
-  
-    while (!mqttClient.connected()) {
-      
-        Serial.println("Connection to MQTT Broker ...");
-        if (mqttClient.connect("ESP32Client", MQTT_USERNAME, MQTT_PASSWORD)) {
-            Serial.println("Connected to MQTT broker");
-            mqttClient.subscribe(MQTT_TOPIC_TAG);
-            mqttClient.subscribe(MQTT_TOPIC_LOC);
-            mqttClient.subscribe(MQTT_TOPIC_BAT);
-        } else {
-            Serial.print("Failed to connect to MQTT broker. Error: ");
-            Serial.println(mqttClient.state());
-            delay(2000);
-        }
+  mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+  // mqttClient.setCallback(callback);
+
+  while (!mqttClient.connected()) {
+    
+    Serial.println("Connection to MQTT Broker ...");
+    if (mqttClient.connect("ESP32Client", MQTT_USERNAME, MQTT_PASSWORD)) {
+      Serial.println("Connected to MQTT broker");
+      mqttClient.subscribe(MQTT_TOPIC_KEYFOB);
+      mqttClient.subscribe(MQTT_TOPIC_LOC);
+      mqttClient.subscribe(MQTT_TOPIC_BAT);
+      mqttClient.subscribe(MQTT_TOPIC_MODEM);
+    } else {
+      Serial.print("Failed to connect to MQTT broker. Error: ");
+      Serial.println(mqttClient.state());
+      delay(2000);
     }
+  }
 }
 
-void sendLocation(float lat, float lng) {
-  String payload = "{\"latitude\":" + String(lat, 6) + ",\"longitude\":" + String(lng, 6) + "}";
+void sendLocation(float lat, float lng, float alt=0, float speed=0, float accuracy=0) {
+  String payload = "{\"latitude\":" + String(lat, 6) + ",\"longitude\":" + String(lng, 6) + ",\"altitude\":" + 
+    String(alt, 2) + ",\"speed\":" + String(speed, 2) + ",\"accuracy\":" + String(accuracy, 2) + "}";
   mqttClient.publish(MQTT_TOPIC_LOC, payload.c_str());
   Serial.println("📡 Sent: " + payload);
 }
 
-void sendTagStatus(bool found) {
+void sendKeyFobStatus(bool found) {
   String payload = "{\"status\":\"" + String(found ? "found" : "not_found") + "\"}";
-  mqttClient.publish(MQTT_TOPIC_TAG, payload.c_str());
-  Serial.println("🔵 BLE tag: " + String(found ? "found" : "not_found"));
+  mqttClient.publish(MQTT_TOPIC_KEYFOB, payload.c_str());
+  Serial.println("🔵 BLE key fob: " + String(found ? "found" : "not_found"));
 }
 
 void sendBatteryStatus() {
@@ -89,17 +80,27 @@ void sendBatteryStatus() {
   Serial.println("Battery voltage: " + String(voltage, 2) + " V (" + String(percent) + "%)");    
 }
 
+void sendModemStatus() {
+  String modemInfo = modem.getModemInfo();
+  String signalQuality = String(modem.getSignalQuality());
+
+  String payload = "{\"modemInfo\": \"" + modemInfo + "\", \"signalQuality\": " + signalQuality + "}";
+  mqttClient.publish(MQTT_TOPIC_MODEM, payload.c_str());
+  Serial.println("Modem Info: " + modemInfo);    
+  Serial.println("Signal Quality: " + signalQuality);    
+}
+
 // ------------------------------------------------------
 
 
 void setup() {
   Serial.begin(115200);
   delay(10);
-  Serial.println("🚗 ESP32 Crash Wake Tracker starting...");
+  Serial.println("ESPTracer starting...");
 
   // Αν ΞΥΠΝΗΣΕ από motion
   if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0) {
-    Serial.println("💥 Motion detected – wakeup event!");
+    Serial.println("Motion detected – wakeup event!");
   } else {
     Serial.println("Normal boot");
   }
@@ -111,13 +112,12 @@ void setup() {
   // Init modem
   modemPowerOn();
 
-  // setupModemSerial();
   SerialAT.begin(UART_BAUD, SERIAL_8N1, MODEM_RX_PIN, MODEM_TX_PIN);
-  delay(10000); // Wait for serial to initialize
+  delay(5000); // Wait for serial to initialize
 
   Serial.println("Initializing modem...");
   if (!modem.init()) {
-    Serial.println("Failed to restart modem, attempting to continue without restarting");
+    Serial.println("Failed to initialize modem, attempting to continue without modem...");
   }
 
   // Unlock your SIM card with a PIN if needed
@@ -127,14 +127,6 @@ void setup() {
   }
 
   delay(1000);
-
-  
-  // Init BLE
-  BLEDevice::init("");
-  pBLEScan = BLEDevice::getScan();
-  pBLEScan->setActiveScan(true);
-  // pBLEScan->setInterval(100);
-  // pBLEScan->setWindow(99);
 
   // Print modem info
   // String modemName = modem.getModemName();
@@ -152,8 +144,9 @@ void setup() {
   if (!modem.gprsConnect(APN, GPRS_USER, GPRS_PASS)) {
     Serial.println(" fail");
     checkModemStatus();
-    // Serial.println("signal quality: " + String(modem.getSignalQuality()));
-    delay(10000);
+    Serial.println("signal quality: " + String(modem.getSignalQuality()));
+    delay(10000);   // Wait 10s and try again
+    sendModemStatus();
     return;
   }
   Serial.println(" success");
@@ -175,26 +168,36 @@ void setup() {
   connectToMQTT();
   delay(1000);
 
-  // Battery status every time esp boots
+  // === BLE key fob scan - Every time ESP wakes up ===
+  BLEDevice::init("");
+  pBLEScan = BLEDevice::getScan();
+  pBLEScan->setActiveScan(true);
+  pBLEScan->setInterval(100);  // Set scan interval to 100ms
+  pBLEScan->setWindow(99);   // Set scan window to 99ms (less or equal to setInterval value)
+
+  BLEScanResults results = pBLEScan->start(4, false);
+  keyFobFound = false;
+  for (int i = 0; i < results.getCount(); i++) {
+    BLEAdvertisedDevice device = results.getDevice(i);
+    if (device.getAddress().toString() == KEYFOB_MAC_ADDRESS && device.getRSSI() > -80) {
+      keyFobFound = true;
+    }
+  }
+  sendKeyFobStatus(keyFobFound);
+
+  // Battery status every time ESP wakes up
   sendBatteryStatus();
 
   lastMotion = millis();
 }
 
 void loop() {
-  // === BLE tag scan ===
-  BLEScanResults results = pBLEScan->start(4, false);
-  tagFound = false;
-  for (int i = 0; i < results.getCount(); i++) {
-    BLEAdvertisedDevice device = results.getDevice(i);
-    if (device.getAddress().toString() == ITAG_MAC_ADDRESS) {
-      tagFound = true;
-    }
-  }
-  sendTagStatus(tagFound);
 
   // === GPS ===
-  delay(3000);
+  if (!firstBoot) {
+    delay(sendInterval); // Send location every 10s
+    firstBoot = false;
+  }
   float lat=0, lon=0, speed=0, alt=0, accuracy=0;
   int   vsat=0, usat=0, year=0, month=0, day=0, hour=0, min=0, sec=0;
   
@@ -202,27 +205,23 @@ void loop() {
     Serial.println("Requesting current GPS/GNSS/GLONASS location");
     if (modem.getGPS(&lat, &lon, &speed, &alt, &vsat, &usat, &accuracy,
         &year, &month, &day, &hour, &min, &sec)) {
-      // Print data
-      /* Serial.println("Latitude: " + String(lat, 8) + "\tLongitude: " + String(lon, 8));
-      Serial.println("Speed: " + String(speed) + "\tAltitude: " + String(alt));
-      Serial.println("Visible Satellites: " + String(vsat) + "\tUsed Satellites: " + String(usat));
-      Serial.println("Accuracy: " + String(accuracy));
-      Serial.println("Year: " + String(year) + "\tMonth: " + String(month) + "\tDay: " + String(day));
-      Serial.println("Hour: " + String(hour) + "\tMinute: " + String(min) + "\tSecond: " + String(sec)); */
       
       // Send over MQTT
-      sendLocation(lat, lon);
+      sendLocation(lat, lon, alt, speed, accuracy);
       break;
     } 
     else {
       Serial.println("Couldn't get GPS/GNSS/GLONASS location, retrying in 15s.");
-      delay(15000L);
+      delay(15000L);  // Wait 15s and try again
     }
   }
 
   // === Check inactivity ===
   if (millis() - lastMotion > motionTimeout) {
     Serial.println("🛑 No motion – going to sleep...");
+
+    // Battery status before sleep
+    sendBatteryStatus();
 
     modem.gprsDisconnect();
     GPSTurnOff();
@@ -247,3 +246,23 @@ void loop() {
 //   mpu.setIntMotionEnabled(true);
 //   delay(100);
 // }
+
+
+float ReadBatteryVoltage() {
+    analogSetAttenuation(ADC_ATTEN);
+    analogReadResolution(ADC_RES);
+
+    uint32_t raw_mv = analogReadMilliVolts(BOARD_BAT_ADC_PIN);  // mV
+    float voltage = (raw_mv / 1000.0) * VOLTAGE_DIVIDER; // convert to volts
+
+    // sanity check
+    if (voltage < 2.5 || voltage > 5.0) return 0;
+    return voltage;
+}
+
+// ---- Convert voltage to percentage ----
+int BatteryPercent(float voltage) {
+    if (voltage <= 3.0) return 0;
+    if (voltage >= 4.2) return 100;
+    return (int)(((voltage - 3.0) / (4.2 - 3.0)) * 100);
+}

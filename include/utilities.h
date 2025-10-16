@@ -15,12 +15,10 @@
 
 #include <TinyGsmClient.h>
 #include <PubSubClient.h>
-#include <TinyGPSPlus.h>
 
 extern TinyGsm modem;
 extern TinyGsmClient client;
 extern PubSubClient mqttClient;
-extern TinyGPSPlus gps;
 
 // --- Modem pins ---
 #define UART_BAUD        115200
@@ -28,6 +26,7 @@ extern TinyGPSPlus gps;
 #define MODEM_RX_PIN     26
 #define MODEM_PWRKEY_PIN 4
 #define MODEM_DTR_PIN    25
+
 #define MODEM_GPS_EN_PIN 48
 #define MODEM_GPS_EN_LEVEL 1
 
@@ -50,9 +49,3 @@ extern TinyGPSPlus gps;
 #define ADC_ATTEN ADC_11db  // ADC attenuation
 #define VOLTAGE_DIVIDER 2.0 // Divider R1=R2=100k
 #define ADC_RES 12          // ADC resolution
-
-
-// Helper: start the modem UART
-inline void setupModemSerial(uint32_t baud = 115200) {
-    SerialAT.begin(baud, SERIAL_8N1, MODEM_RX_PIN, MODEM_TX_PIN);
-}
