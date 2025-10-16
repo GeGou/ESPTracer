@@ -1,0 +1,124 @@
+sensor:
+  # === BATTERY VOLTAGE (V) ===
+  - name: "Battery Voltage"
+    unique_id: esptracer_battery_voltage
+    state_topic: "esptracer/battery"
+    value_template: "{{ value_json.battery | float }}"
+    unit_of_measurement: "V"
+    device_class: voltage
+    icon: mdi:battery
+    device:
+      identifiers: ["esptracer_device"]
+      name: "ESPTracer"
+      manufacturer: "Custom"
+      model: "LiLyGO T-SIM7000G"
+
+  # === BATTERY LEVEL (%) ===
+  - name: "Battery Level"
+    unique_id: esptracer_battery_level
+    state_topic: "esptracer/battery"
+    value_template: "{{ value_json.batteryLevel | int }}"
+    unit_of_measurement: "%"
+    device_class: battery
+    icon: mdi:battery-high
+    device:
+      identifiers: ["esptracer_device"]
+      name: "ESPTracer"
+      manufacturer: "Custom"
+      model: "LiLyGO T-SIM7000G"
+
+  # === SPEED ===
+  - name: "Speed"
+    unique_id: esptracer_speed
+    state_topic: "esptracer/location"
+    value_template: "{{ value_json.speed | float }}"
+    unit_of_measurement: "km/h"
+    icon: mdi:speedometer
+    device_class: speed
+    device:
+      identifiers: ["esptracer_device"]
+      name: "ESPTracer"
+      manufacturer: "Custom"
+      model: "LiLyGO T-SIM7000G"
+
+  # === ALTITUDE ===
+  - name: "Altitude"
+    unique_id: esptracer_altitude
+    state_topic: "esptracer/location"
+    value_template: "{{ value_json.altitude | float }}"
+    unit_of_measurement: "m"
+    icon: mdi:altimeter
+    device:
+      identifiers: ["esptracer_device"]
+      name: "ESPTracer"
+      manufacturer: "Custom"
+      model: "LiLyGO T-SIM7000G"
+
+  # === ACCURACY ===
+  - name: "Accuracy"
+    unique_id: esptracer_accuracy
+    state_topic: "esptracer/location"
+    value_template: "{{ value_json.gps_accuracy | float }}"
+    unit_of_measurement: "m"
+    icon: mdi:crosshairs-gps
+    device:
+      identifiers: ["esptracer_device"]
+      name: "ESPTracer"
+      manufacturer: "Custom"
+      model: "LiLyGO T-SIM7000G"
+
+  # === MODEM INFORMATIONS ===
+  - name: "Modem Info"
+    unique_id: esptracer_modem_info
+    state_topic: "esptracer/modem"
+    value_template: "{{ value_json.modemInfo }}"
+    icon: mdi:cellphone-wireless
+    json_attributes_topic: "esptracer/modem"
+    device:
+      identifiers: ["esptracer_device"]
+      name: "ESPTracer"
+      manufacturer: "Custom"
+      model: "LilyGO T-SIM7000G"
+
+  - name: "Signal Quality"
+    unique_id: esptracer_signal_quality
+    state_topic: "esptracer/modem"
+    value_template: "{{ value_json.signalQuality }}"
+    unit_of_measurement: "dBm"
+    icon: mdi:signal-cellular-3
+    device:
+      identifiers: ["esptracer_device"]
+      name: "ESPTracer"
+      manufacturer: "Custom"
+      model: "LilyGO T-SIM7000G"
+
+# === BLE KEYFOB PRESENCE ===
+binary_sensor:
+  - name: "Keyfob Connected"
+    unique_id: esptracer_keyfob
+    state_topic: "esptracer/keyfob"
+    value_template: "{{ value_json.status }}"
+    payload_on: "found"
+    payload_off: "not_found"
+    device_class: connectivity
+    icon: mdi:bluetooth
+    device:
+      identifiers: ["esptracer_device"]
+      name: "ESPTracer"
+      manufacturer: "Custom"
+      model: "LiLyGO T-SIM7000G"
+
+# === DEVICE TRACKER (MAP INTEGRATION) ===
+device_tracker:
+  - name: "GPS Tracker"
+    unique_id: esptracer_tracker
+    state_topic: "esptracer/location"
+    json_attributes_topic: "esptracer/location"
+    # Home Assistant αναμένει latitude/longitude/gps_accuracy
+    value_template: "{{ 'home' if value_json.gps_accuracy < 50 else 'away' }}"
+    icon: mdi:crosshairs-gps
+    device:
+      identifiers: ["esptracer_device"]
+      name: "ESPTracer"
+      manufacturer: "Custom"
+      model: "LiLyGO T-SIM7000G"

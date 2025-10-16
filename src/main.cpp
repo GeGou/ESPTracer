@@ -1,6 +1,3 @@
-// ESP-based GPS + BLE Key Fob + Motion Sensor + MQTT tracker
-// Modules: LilyGo SIM7000G, SW-420, MPU6050, BLE (for key fob detection)
-
 #include <Arduino.h>
 #include "config.h"
 #include "utilities.h"
@@ -60,7 +57,7 @@ void connectToMQTT() {
 
 void sendLocation(float lat, float lng, float alt=0, float speed=0, float accuracy=0) {
   String payload = "{\"latitude\":" + String(lat, 6) + ",\"longitude\":" + String(lng, 6) + ",\"altitude\":" + 
-    String(alt, 2) + ",\"speed\":" + String(speed, 2) + ",\"accuracy\":" + String(accuracy, 2) + "}";
+    String(alt, 2) + ",\"speed\":" + String(speed, 2) + ",\"gps_accuracy\":" + String(accuracy, 2) + "}";
   mqttClient.publish(MQTT_TOPIC_LOC, payload.c_str());
   Serial.println("📡 Sent: " + payload);
 }
@@ -128,17 +125,7 @@ void setup() {
 
   delay(1000);
 
-  // Print modem info
-  // String modemName = modem.getModemName();
-  // delay(500);
-  // Serial.println("Modem Name: " + modemName);
-
-  // String modemInfo = modem.getModemInfo();
-  // delay(500);
-  // Serial.println("Modem Info: " + modemInfo);
-
   // Connect to network
-  // GPRS connection parameters are usually set after network registration
   Serial.print(F("Connecting to "));
   Serial.print(APN);
   if (!modem.gprsConnect(APN, GPRS_USER, GPRS_PASS)) {
@@ -146,13 +133,13 @@ void setup() {
     checkModemStatus();
     Serial.println("signal quality: " + String(modem.getSignalQuality()));
     delay(10000);   // Wait 10s and try again
-    sendModemStatus();
     return;
   }
+
   Serial.println(" success");
   Serial.print("Local IP: ");
   Serial.println(modem.getLocalIP());
-  
+
   // Check GPRS connection
   if (modem.isGprsConnected()) {
     Serial.println("GPRS connected");
@@ -188,31 +175,36 @@ void setup() {
   // Battery status every time ESP wakes up
   sendBatteryStatus();
 
+  // Modem status every time ESP wakes up
+  sendModemStatus();
+
   lastMotion = millis();
 }
 
 void loop() {
 
   // === GPS ===
-  if (!firstBoot) {
-    delay(sendInterval); // Send location every 10s
+  if (firstBoot || millis() - lastSend >= sendInterval) {
     firstBoot = false;
-  }
-  float lat=0, lon=0, speed=0, alt=0, accuracy=0;
-  int   vsat=0, usat=0, year=0, month=0, day=0, hour=0, min=0, sec=0;
-  
-  for (int8_t i = 15; i; i--) {
-    Serial.println("Requesting current GPS/GNSS/GLONASS location");
-    if (modem.getGPS(&lat, &lon, &speed, &alt, &vsat, &usat, &accuracy,
-        &year, &month, &day, &hour, &min, &sec)) {
-      
-      // Send over MQTT
-      sendLocation(lat, lon, alt, speed, accuracy);
-      break;
-    } 
-    else {
-      Serial.println("Couldn't get GPS/GNSS/GLONASS location, retrying in 15s.");
-      delay(15000L);  // Wait 15s and try again
+    lastSend = millis();
+
+    // Read GPS location and send it over MQTT
+    float lat=0, lon=0, speed=0, alt=0, accuracy=0;
+    int   vsat=0, usat=0, year=0, month=0, day=0, hour=0, min=0, sec=0;
+    
+    for (int8_t i = 15; i; i--) {
+      Serial.println("Requesting current GPS/GNSS/GLONASS location");
+      if (modem.getGPS(&lat, &lon, &speed, &alt, &vsat, &usat, &accuracy,
+          &year, &month, &day, &hour, &min, &sec)) {
+        
+        // Send over MQTT
+        sendLocation(lat, lon, alt, speed, accuracy);
+        break;
+      } 
+      else {
+        Serial.println("Couldn't get GPS/GNSS/GLONASS location, retrying in 15s.");
+        delay(15000L);  // Wait 15s and try again
+      }
     }
   }
 
