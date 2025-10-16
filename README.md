@@ -1,5 +1,5 @@
 # LilyGO T-SIM7000G + MQTT + Owner Detect + Home Assistant intergrate
-# This project uses the LilyGO T-SIM7000G ESP32 board for a DIY GPS Tracker with owner detection using a BLE keyfob.
+## This project uses the LilyGO T-SIM7000G ESP32 board for a DIY GPS Tracker with owner detection using a BLE keyfob.
 
 ## Overview
 NOTE: File mqtt_tracer.yaml has been created for Home Assistant use with the mqtt itergration. 
