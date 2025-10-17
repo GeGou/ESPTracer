@@ -114,8 +114,7 @@ device_tracker:
     unique_id: esptracer_tracker
     state_topic: "esptracer/location"
     json_attributes_topic: "esptracer/location"
-    # Home Assistant αναμένει latitude/longitude/gps_accuracy
-    value_template: "{{ 'home' if value_json.gps_accuracy < 50 else 'away' }}"
+    value_template: "{{ value_json.state }}"
     icon: mdi:crosshairs-gps
     device:
       identifiers: ["esptracer_device"]
