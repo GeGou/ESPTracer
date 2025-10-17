@@ -1,8 +1,12 @@
 # LilyGO T-SIM7000G + MQTT + Owner Detect + Home Assistant intergrate
 ## This project uses the LilyGO T-SIM7000G ESP32 board for a DIY GPS Tracker with owner detection using a BLE keyfob.
 
+**Before continue**, read this issue about LilyGO T-SIM7000G unexpected shutdown when in battery mode.
+Fix is very easy and need to connect Vbat- to GND, i use a 26awg cable.
+https://github.com/Xinyuan-LilyGO/LilyGO-T-SIM7000G/issues/65
+
 ## Overview
-NOTE: File mqtt_tracer.yaml has been created for Home Assistant use with the mqtt itergration. 
+NOTE: File mqtt_tracer.yaml has been created for Home Assistant using the MQTT itergration. 
 - Go to Home Assistant config folder and in configuration.yaml add the line: mqtt: !include mqtt_esptracer.yaml
 - Add the file config/mqtt_esptracer.yaml.
 - Restart Home Assistant.
@@ -56,6 +60,6 @@ How this project works:
 
 ### Libraries Used
 
-- **TinyGSM** – communication with SIM7000G modem  
-- **PubSubClient** – MQTT client
+- TinyGSM by Volodymyr Shymanskyy
+- PubSubClient by Nick O'Leary
 
