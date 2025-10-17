@@ -3,7 +3,7 @@
 
 **Before continue**, read this issue about LilyGO T-SIM7000G unexpected shutdown when in battery mode.
 Fix is very easy and need to connect Vbat- to GND, i use a 26awg cable.
-https://github.com/Xinyuan-LilyGO/LilyGO-T-SIM7000G/issues/65
+`(https://github.com/Xinyuan-LilyGO/LilyGO-T-SIM7000G/issues/65)`
 
 ## Overview
 NOTE: File mqtt_tracer.yaml has been created for Home Assistant using the MQTT itergration. 
