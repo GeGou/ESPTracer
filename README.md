@@ -1,12 +1,19 @@
 # LilyGO T-SIM7000G + MQTT + Owner Detect + Home Assistant intergrate
-## This project uses the LilyGO T-SIM7000G ESP32 board for a DIY GPS Tracker with owner detection using a BLE keyfob.
 
-**>Before continue**, read this issue about LilyGO T-SIM7000G unexpected shutdown when in battery mode.
+**> BEFORE CONTINUE**, read this issue about LilyGO T-SIM7000G unexpected shutdown when in battery mode.
 Fix is very easy and need to connect Vbat- to GND, i use a 26awg cable.
 `https://github.com/Xinyuan-LilyGO/LilyGO-T-SIM7000G/issues/65`
 
-## Overview
-NOTE: File mqtt_tracer.yaml has been created for Home Assistant using the MQTT itergration. 
+### - This project hasn't tested yet using other esp32 boards
+
+## How this project works:
+- It is usually in deep sleep mode and wakes up when a vibration occurs using a SW-420 sensor(not tested using other sensor yet, like MPU6050).
+- After the wake up, a ble scan takes place to detect the presence of a **BLE keyfob** based on its MAC adress(e.g. beacon or Bluetooth device).
+- Sending data through **MQTT** over GPRS/LTE about the BLE keyfob status(found/not_found) and GPS cordinates as well as speed, altitude, gps accuracy and modem informations.
+- Stop to obtain **GPS coordinates** when no motion detected for a specific period of time(default is 5 min) and goes back to deep sleep mode again.
+  
+## Home Assistant 
+**NOTE**: File mqtt_tracer.yaml has been created for Home Assistant using the MQTT itergration. 
 - Go to Home Assistant config folder and in configuration.yaml add the line: mqtt: !include mqtt_esptracer.yaml
 - Add the file config/mqtt_esptracer.yaml.
 - Restart Home Assistant.
@@ -21,12 +28,6 @@ NOTE: File mqtt_tracer.yaml has been created for Home Assistant using the MQTT i
     - sensor.esptracer_modem_info
     - device_tracker.esptracer_gps_tracker
     - binary_sensor.esptracer_keyfob_connected
-
-How this project works:
-- It is usually in deep sleep mode and wakes up when a vibration occurs using a SW-420 sensor.
-- After the wake up a ble scan takes place to detect the presence of a **BLE keyfob** based on its MAC adress(e.g. beacon or Bluetooth device).
-- Sending data through **MQTT** over GPRS/LTE about the BLE tag detection(found/not_found) and GPS cordinates such as speed, altitude, gps accuracy and modem informations.
-- Stop to obtain **GPS coordinates** when no motion detected for a specific period of time(default is 5 min) and goes back to deep sleep mode again.
 
 
 ## Hardware Components
