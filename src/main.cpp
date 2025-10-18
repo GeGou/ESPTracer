@@ -5,7 +5,6 @@
 // #include "MPU6050.h"
 #include <BLEDevice.h>
 
-
 TinyGsm modem(SerialAT);
 TinyGsmClient client(modem);
 PubSubClient mqttClient(client);
@@ -14,9 +13,9 @@ PubSubClient mqttClient(client);
 BLEScan* pBLEScan;
 bool keyFobFound = false;
 
-// ==== MPU6050 ====
+// ==== MPU6050 ==== not tested
 // MPU6050 mpu;
-// #define MPU_INT_PIN 34  // Πρέπει να είναι RTC_GPIO για wakeup
+// #define MPU_INT_PIN 34  // need to be RTC_GPIO for wakeup
 // volatile bool motionDetected = false;
 
 
@@ -36,7 +35,7 @@ int BatteryPercent(float voltage);
 
 void connectToMQTT() {
   mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
-  // mqttClient.setCallback(callback);
+  mqttClient.setCallback(callback);
 
   while (!mqttClient.connected()) {
     
@@ -47,6 +46,7 @@ void connectToMQTT() {
       mqttClient.subscribe(MQTT_TOPIC_LOC);
       mqttClient.subscribe(MQTT_TOPIC_BAT);
       mqttClient.subscribe(MQTT_TOPIC_MODEM);
+      mqttClient.subscribe("esptracer/command");  // Not tested yet
     } else {
       Serial.print("Failed to connect to MQTT broker. Error: ");
       Serial.println(mqttClient.state());
@@ -87,15 +87,35 @@ void sendModemStatus() {
   Serial.println("Signal Quality: " + signalQuality);    
 }
 
-// ------------------------------------------------------
+void callback(char* topic, byte* payload, unsigned int length) {
+  String message;
+  for (int i = 0; i < length; i++) {
+    message += (char)payload[i];
+  }
+  Serial.print("MQTT Message [");
+  Serial.print(topic);
+  Serial.print("]: ");
+  Serial.println(message);
 
+  // Check for reboot command
+  if (String(topic) == "esptracer/command") {
+    message.trim();
+    if (message.equalsIgnoreCase("reboot")) {
+      Serial.println("Reboot command received via MQTT!");
+      delay(500);
+      ESP.restart();
+    }
+  }
+}
+
+// ------------------------------------------------------
 
 void setup() {
   Serial.begin(115200);
   delay(10);
   Serial.println("ESPTracer starting...");
 
-  // Αν ΞΥΠΝΗΣΕ από motion
+  // Print wakeup reason
   if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0) {
     Serial.println("Motion detected – wakeup event!");
   } else {
@@ -194,6 +214,7 @@ void loop() {
     
     for (int8_t i = 15; i; i--) {
       Serial.println("Requesting current GPS/GNSS/GLONASS location");
+      // Don't need all this data yet
       if (modem.getGPS(&lat, &lon, &speed, &alt, &vsat, &usat, &accuracy,
           &year, &month, &day, &hour, &min, &sec)) {
         
@@ -215,6 +236,7 @@ void loop() {
     // Battery status before sleep
     sendBatteryStatus();
 
+    // Shutdown modem and GPS to save power
     modem.gprsDisconnect();
     GPSTurnOff();
     modemPowerOff();
@@ -228,7 +250,7 @@ void loop() {
   mqttClient.loop();
 }
 
-// // ==== MPU Initialization ====
+// // ==== MPU Initialization ==== not tested
 // void initMPU() {
 //   mpu.initialize();
 //   mpu.setMotionDetectionThreshold(2);  // ευαισθησία

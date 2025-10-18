@@ -14,7 +14,7 @@ Fix is very easy and need to connect Vbat- to GND, i use a 26awg cable.
 
 ---
 
-> **Before use** this project you need to create your own include/config.h file using based on include/config.example.h file pattern. 
+**Before use** this project you need to create your own include/config.h file using based on include/config.example.h file pattern. 
 To flash the code you can use the **Platformio** extension in **VS Code**.
 
 - **[Visual Studio Code](https://code.visualstudio.com/)**  
@@ -38,6 +38,9 @@ To flash the code you can use the **Platformio** extension in **VS Code**.
     - sensor.esptracer_modem_info
     - device_tracker.esptracer_gps_tracker
     - binary_sensor.esptracer_keyfob_connected
+    - button.esptracer_reboot 
+
+> **button.esptracer_reboot** only works if ESP board is awake**
 
 ---
 

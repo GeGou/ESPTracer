@@ -121,3 +121,16 @@ device_tracker:
       name: "ESPTracer"
       manufacturer: "Custom"
       model: "LiLyGO T-SIM7000G"
+
+# === REMOTE COMMANDS (BUTTONS) ===
+button:
+  - name: "Reboot"
+    unique_id: esptracer_reboot_button
+    command_topic: "esptracer/command"
+    payload_press: "reboot"
+    icon: mdi:restart
+    device:
+      identifiers: ["esptracer_device"]
+      name: "ESPTracer"
+      manufacturer: "Custom"
+      model: "LiLyGO T-SIM7000G"
