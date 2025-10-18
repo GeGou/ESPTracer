@@ -1,6 +1,6 @@
 # LilyGO T-SIM7000G + MQTT + Owner Detect + Home Assistant intergrate
 
-**> BEFORE CONTINUE**, read this issue about LilyGO T-SIM7000G unexpected shutdown when in battery mode.
+**BEFORE CONTINUE**, in order to use the board in battery powered mode, you need first to read the following about an issue of unexpected shutdown when in battery powered.
 Fix is very easy and need to connect Vbat- to GND, i use a 26awg cable.
 `https://github.com/Xinyuan-LilyGO/LilyGO-T-SIM7000G/issues/65`
 
@@ -11,7 +11,17 @@ Fix is very easy and need to connect Vbat- to GND, i use a 26awg cable.
 - After the wake up, a ble scan takes place to detect the presence of a **BLE keyfob** based on its MAC adress(e.g. beacon or Bluetooth device).
 - Sending data through **MQTT** over GPRS/LTE about the BLE keyfob status(found/not_found) and GPS cordinates as well as speed, altitude, gps accuracy and modem informations.
 - Stop to obtain **GPS coordinates** when no motion detected for a specific period of time(default is 5 min) and goes back to deep sleep mode again.
-  
+
+---
+
+> **Before use** this project you need to create your own include/config.h file using based on include/config.example.h file pattern. 
+To flash the code you can use the **Platformio** extension in **VS Code**.
+
+- **[Visual Studio Code](https://code.visualstudio.com/)**  
+- **[PlatformIO IDE](https://platformio.org/install/ide?install=vscode)**
+
+---
+
 ## Home Assistant 
 **NOTE**: File mqtt_tracer.yaml has been created for Home Assistant using the MQTT itergration. 
 - Go to Home Assistant config folder and in configuration.yaml add the line: mqtt: !include mqtt_esptracer.yaml
@@ -29,6 +39,7 @@ Fix is very easy and need to connect Vbat- to GND, i use a 26awg cable.
     - device_tracker.esptracer_gps_tracker
     - binary_sensor.esptracer_keyfob_connected
 
+---
 
 ## Hardware Components
 
@@ -43,23 +54,22 @@ Fix is very easy and need to connect Vbat- to GND, i use a 26awg cable.
 
 ---
 
-## Pin Connections
+## Battery tests
 
-| TTGO Pin | Description |
-|-----------|-------------|
-| 25 | DTR (modem sleep control) |
-| 26 | RX modem |
-| 27 | TX modem |
-| 4  | Power Key (PWRKEY of SIM7000) |
-| 12 | LED status indicator |
-| 35 | ADC for battery voltage measurement |
-| 32 | Input from ball switch (interrupt wake-up) |
+Below are the results from several runtime tests of the LilyGO T-SIM7000G operating in **battery-powered mode**.
+
+| Test # | Mode / Functionality | Battery Capacity (mAh) | Runtime (hours) | Notes |
+|:------:|----------------------|:----------------------:|:----------------|:------|
+| 1 | Continuous GPS tracking (LTE ON) | 3000 | -- | --- |
+| 2 | GPS + MQTT updates every 5 min | 3000  |  -- | --- |
+| 3 | GPS + MQTT updates every 30 min | 3000 | -- | --- |
+| 4 | Deep sleep only (no updates) | 3000 | -- | --- |
+
+> **Note:** Runtime values are approximate and may vary depending on signal strength, temperature, and board revision.
 
 ---
 
-## Software
-
-### Libraries Used
+## Libraries Used
 
 - TinyGSM by Volodymyr Shymanskyy
 - PubSubClient by Nick O'Leary
