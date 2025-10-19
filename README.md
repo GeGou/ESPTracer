@@ -64,11 +64,12 @@ Below are the results from several runtime tests of the LilyGO T-SIM7000G operat
 | Test # | Mode / Functionality | Battery Capacity (mAh) | Runtime (hours) | Notes |
 |:------:|----------------------|:----------------------:|:----------------|:------|
 | 1 | Continuous GPS tracking (LTE ON) | 3000 | -- | --- |
-| 2 | GPS + MQTT updates every 5 min | 3000  |  -- | --- |
+| 2 | GPS + MQTT updates every 10 seconds | 3000  |  -- | --- |
 | 3 | GPS + MQTT updates every 30 min | 3000 | -- | --- |
-| 4 | Deep sleep only (no updates) | 3000 | -- | --- |
+| 4 | Deep sleep | 3000 | 18072 | Based on LilyGO statistics |
 
 > **Note:** Runtime values are approximate and may vary depending on signal strength, temperature, and board revision.
+> T-SIM7000G-S3-Standard DeepSleep Current dynamic changes Min:59uA , Max273uA ,Avg:166uA
 
 ---
 

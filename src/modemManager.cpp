@@ -1,11 +1,12 @@
 #include "modemManager.h"
 #include "utilities.h"
 
-void modemPowerOn(){
+void modemPowerOn() {
   pinMode(MODEM_PWRKEY_PIN, OUTPUT);
+  digitalWrite(MODEM_PWRKEY_PIN, LOW);
+  delay(1500);
   digitalWrite(MODEM_PWRKEY_PIN, HIGH);
   delay(1000);
-  digitalWrite(MODEM_PWRKEY_PIN, LOW);
 }
 
 void modemPowerOff(){
@@ -13,6 +14,7 @@ void modemPowerOff(){
   digitalWrite(MODEM_PWRKEY_PIN, LOW);
   delay(1500);
   digitalWrite(MODEM_PWRKEY_PIN, HIGH);
+  delay(1000);
 }
 
 void modemRestart(){

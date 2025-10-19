@@ -13,11 +13,6 @@ PubSubClient mqttClient(client);
 BLEScan* pBLEScan;
 bool keyFobFound = false;
 
-// ==== MPU6050 ==== not tested
-// MPU6050 mpu;
-// #define MPU_INT_PIN 34  // need to be RTC_GPIO for wakeup
-// volatile bool motionDetected = false;
-
 
 // ==== Tracking ====
 unsigned long sendInterval = 10000; // κάθε 10s
@@ -33,6 +28,27 @@ int BatteryPercent(float voltage);
 
 // ------------------------------------------------------
 
+void callback(char* topic, byte* payload, unsigned int length) {
+  String message;
+  for (int i = 0; i < length; i++) {
+    message += (char)payload[i];
+  }
+  // Serial.print("MQTT Message [");
+  // Serial.print(topic);
+  // Serial.print("]: ");
+  // Serial.println(message);
+
+  // Check for reboot command
+  if (String(topic) == "esptracer/command") {
+    message.trim();
+    if (message.equalsIgnoreCase("reboot")) {
+      Serial.println("Reboot command received via MQTT!");
+      delay(500);
+      ESP.restart();
+    }
+  }
+}
+
 void connectToMQTT() {
   mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
   mqttClient.setCallback(callback);
@@ -46,7 +62,7 @@ void connectToMQTT() {
       mqttClient.subscribe(MQTT_TOPIC_LOC);
       mqttClient.subscribe(MQTT_TOPIC_BAT);
       mqttClient.subscribe(MQTT_TOPIC_MODEM);
-      mqttClient.subscribe("esptracer/command");  // Not tested yet
+      mqttClient.subscribe("esptracer/command");
     } else {
       Serial.print("Failed to connect to MQTT broker. Error: ");
       Serial.println(mqttClient.state());
@@ -85,27 +101,6 @@ void sendModemStatus() {
   mqttClient.publish(MQTT_TOPIC_MODEM, payload.c_str());
   Serial.println("Modem Info: " + modemInfo);    
   Serial.println("Signal Quality: " + signalQuality);    
-}
-
-void callback(char* topic, byte* payload, unsigned int length) {
-  String message;
-  for (int i = 0; i < length; i++) {
-    message += (char)payload[i];
-  }
-  Serial.print("MQTT Message [");
-  Serial.print(topic);
-  Serial.print("]: ");
-  Serial.println(message);
-
-  // Check for reboot command
-  if (String(topic) == "esptracer/command") {
-    message.trim();
-    if (message.equalsIgnoreCase("reboot")) {
-      Serial.println("Reboot command received via MQTT!");
-      delay(500);
-      ESP.restart();
-    }
-  }
 }
 
 // ------------------------------------------------------
@@ -239,7 +234,11 @@ void loop() {
     // Shutdown modem and GPS to save power
     modem.gprsDisconnect();
     GPSTurnOff();
-    modemPowerOff();
+    // bool success = modem.poweroff();
+    if (!modem.poweroff()) {
+      Serial.println("Modem didn't respond, forcing power off...");
+      modemPowerOff();
+    }
 
     // Prepare for wake on motion (SW-420 sensor, etc.)
     esp_sleep_enable_ext0_wakeup(GPIO_NUM_32, 1); // modify pin as needed
@@ -250,18 +249,7 @@ void loop() {
   mqttClient.loop();
 }
 
-// // ==== MPU Initialization ==== not tested
-// void initMPU() {
-//   mpu.initialize();
-//   mpu.setMotionDetectionThreshold(2);  // ευαισθησία
-//   mpu.setMotionDetectionDuration(5);   // σταθερή επιτάχυνση
-//   mpu.setInterruptMode(1);
-//   mpu.setDHPFMode(1); // High-pass filter
-//   mpu.setIntMotionEnabled(true);
-//   delay(100);
-// }
-
-
+// ---- Read battery voltage ----
 float ReadBatteryVoltage() {
     analogSetAttenuation(ADC_ATTEN);
     analogReadResolution(ADC_RES);
