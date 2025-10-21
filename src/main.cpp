@@ -2,135 +2,69 @@
 #include "config.h"
 #include "utilities.h"
 #include "modemManager.h"
+#include "mqttManager.h"
 // #include "MPU6050.h"
 #include <BLEDevice.h>
+// #include <WiFi.h>
+// #include <WiFiClient.h>
 
-TinyGsm modem(SerialAT);
-TinyGsmClient client(modem);
-PubSubClient mqttClient(client);
+
+// // WiFiClient wifiClient;
+
+// // PubSubClient mqttClient(wifiClient);
 
 // ==== BLE Key Fob ====
 BLEScan* pBLEScan;
 bool keyFobFound = false;
 
-
 // ==== Tracking ====
-unsigned long sendInterval = 10000; // κάθε 10s
+unsigned long sendInterval = 15000; // κάθε 15s
 unsigned long lastSend = 0;
 unsigned long lastMotion = 0;
-const unsigned long motionTimeout = 5 * 60 * 1000UL; // 5 λεπτά
+const unsigned long motionTimeout = 60 * 1000UL; // 1 λεπτό
+
+// === FUNCTIONS ===
+void sleepNow();
 
 bool firstBoot = true;
-
-// --- FUNCTIONS ---
-float ReadBatteryVoltage();
-int BatteryPercent(float voltage);
-
-// ------------------------------------------------------
-
-void callback(char* topic, byte* payload, unsigned int length) {
-  String message;
-  for (int i = 0; i < length; i++) {
-    message += (char)payload[i];
-  }
-  // Serial.print("MQTT Message [");
-  // Serial.print(topic);
-  // Serial.print("]: ");
-  // Serial.println(message);
-
-  // Check for reboot command
-  if (String(topic) == "esptracer/command") {
-    message.trim();
-    if (message.equalsIgnoreCase("reboot")) {
-      Serial.println("Reboot command received via MQTT!");
-      delay(500);
-      ESP.restart();
-    }
-  }
-}
-
-void connectToMQTT() {
-  mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
-  mqttClient.setCallback(callback);
-
-  while (!mqttClient.connected()) {
-    
-    Serial.println("Connection to MQTT Broker ...");
-    if (mqttClient.connect("ESP32Client", MQTT_USERNAME, MQTT_PASSWORD)) {
-      Serial.println("Connected to MQTT broker");
-      mqttClient.subscribe(MQTT_TOPIC_KEYFOB);
-      mqttClient.subscribe(MQTT_TOPIC_LOC);
-      mqttClient.subscribe(MQTT_TOPIC_BAT);
-      mqttClient.subscribe(MQTT_TOPIC_MODEM);
-      mqttClient.subscribe("esptracer/command");
-    } else {
-      Serial.print("Failed to connect to MQTT broker. Error: ");
-      Serial.println(mqttClient.state());
-      delay(2000);
-    }
-  }
-}
-
-void sendLocation(float lat, float lng, float alt=0, float speed=0, float accuracy=0) {
-  String payload = "{\"latitude\":" + String(lat, 6) + ",\"longitude\":" + String(lng, 6) + ",\"altitude\":" + 
-    String(alt, 2) + ",\"speed\":" + String(speed, 2) + ",\"gps_accuracy\":" + String(accuracy, 2) + "}";
-  mqttClient.publish(MQTT_TOPIC_LOC, payload.c_str());
-  Serial.println("📡 Sent: " + payload);
-}
-
-void sendKeyFobStatus(bool found) {
-  String payload = "{\"status\":\"" + String(found ? "found" : "not_found") + "\"}";
-  mqttClient.publish(MQTT_TOPIC_KEYFOB, payload.c_str());
-  Serial.println("🔵 BLE key fob: " + String(found ? "found" : "not_found"));
-}
-
-void sendBatteryStatus() {
-  float voltage = ReadBatteryVoltage();
-  int percent = BatteryPercent(voltage);
-
-  String payload = "{\"battery\": " + String(voltage, 2) + ", \"batteryLevel\": " + String(percent) + "}";
-  mqttClient.publish(MQTT_TOPIC_BAT, payload.c_str());
-  Serial.println("Battery voltage: " + String(voltage, 2) + " V (" + String(percent) + "%)");    
-}
-
-void sendModemStatus() {
-  String modemInfo = modem.getModemInfo();
-  String signalQuality = String(modem.getSignalQuality());
-
-  String payload = "{\"modemInfo\": \"" + modemInfo + "\", \"signalQuality\": " + signalQuality + "}";
-  mqttClient.publish(MQTT_TOPIC_MODEM, payload.c_str());
-  Serial.println("Modem Info: " + modemInfo);    
-  Serial.println("Signal Quality: " + signalQuality);    
-}
-
-// ------------------------------------------------------
+bool normalBoot = false;
 
 void setup() {
   Serial.begin(115200);
-  delay(10);
   Serial.println("ESPTracer starting...");
 
-  // Print wakeup reason
-  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0) {
-    Serial.println("Motion detected – wakeup event!");
-  } else {
+  SerialAT.begin(115200, SERIAL_8N1, MODEM_RX_PIN, MODEM_TX_PIN);
+
+  esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+  Serial.printf("Wakeup cause: %d\n", cause);
+
+  if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_EXT0) {
     Serial.println("Normal boot");
+    normalBoot = true;
+
+  } else {
+    Serial.println("Wakeup from EXT0 (motion)");
   }
+
+  // Pull down DTR to ensure the modem is not in sleep state
+  pinMode(MODEM_DTR_PIN, OUTPUT);
+  digitalWrite(MODEM_DTR_PIN, LOW);
+
+  // Power ON sequence for SIM7000
+  modemPowerOn();
+  delay(5000); // Wait for modem to start
+
+
+  Serial.println("Check modem online .");
+  while (!modem.testAT()) {
+    Serial.print("."); 
+    delay(500);
+  }
+  Serial.println("Modem is online!");
 
   // Set LED OFF
   pinMode(BOARD_LED_PIN, OUTPUT);
   digitalWrite(BOARD_LED_PIN, HIGH);
-
-  // Init modem
-  modemPowerOn();
-
-  SerialAT.begin(UART_BAUD, SERIAL_8N1, MODEM_RX_PIN, MODEM_TX_PIN);
-  delay(5000); // Wait for serial to initialize
-
-  Serial.println("Initializing modem...");
-  if (!modem.init()) {
-    Serial.println("Failed to initialize modem, attempting to continue without modem...");
-  }
 
   // Unlock your SIM card with a PIN if needed
   if (GSM_PIN && modem.getSimStatus() != 3)
@@ -138,37 +72,40 @@ void setup() {
     modem.simUnlock(GSM_PIN);
   }
 
-  delay(1000);
+  delay(500);
 
   // Connect to network
-  Serial.print(F("Connecting to "));
+  Serial.print("Trying to connect to APN: ");
   Serial.print(APN);
-  if (!modem.gprsConnect(APN, GPRS_USER, GPRS_PASS)) {
-    Serial.println(" fail");
-    checkModemStatus();
+  while (!modem.gprsConnect(APN, GPRS_USER, GPRS_PASS)) {
+    Serial.println("GPRS connect failed, retrying...");
     Serial.println("signal quality: " + String(modem.getSignalQuality()));
-    delay(10000);   // Wait 10s and try again
-    return;
+    checkModemStatus();
+    delay(4000);
   }
-
-  Serial.println(" success");
-  Serial.print("Local IP: ");
-  Serial.println(modem.getLocalIP());
 
   // Check GPRS connection
   if (modem.isGprsConnected()) {
     Serial.println("GPRS connected");
+    Serial.print("Local IP: ");
+    Serial.println(modem.getLocalIP());
   } else {
     Serial.println("GPRS not connected");
   }
   
   // Enable GPS
-  GPSTurnOn();
-  delay(1000);
+  // GPSTurnOn();
+  Serial.println("Enabling GPS/GNSS/GLONASS");
+  while (!modem.enableGPS()) {
+      Serial.print(".");
+  }
+  Serial.println();
+  Serial.println("GPS Enabled");
+  delay(500);
 
   // Connect MQTT
   connectToMQTT();
-  delay(1000);
+  delay(500);
 
   // === BLE key fob scan - Every time ESP wakes up ===
   BLEDevice::init("");
@@ -177,7 +114,7 @@ void setup() {
   pBLEScan->setInterval(100);  // Set scan interval to 100ms
   pBLEScan->setWindow(99);   // Set scan window to 99ms (less or equal to setInterval value)
 
-  BLEScanResults results = pBLEScan->start(4, false);
+  BLEScanResults results = pBLEScan->start(3, false);
   keyFobFound = false;
   for (int i = 0; i < results.getCount(); i++) {
     BLEAdvertisedDevice device = results.getDevice(i);
@@ -219,52 +156,62 @@ void loop() {
       } 
       else {
         Serial.println("Couldn't get GPS/GNSS/GLONASS location, retrying in 15s.");
-        delay(15000L);  // Wait 15s and try again
+        delay(200); // wait before retry
+        // Trying to optimize battery life - better than delaying
+        esp_sleep_enable_timer_wakeup(15 * 1000000ULL);  // sleep for 15 sec and try again
+        esp_light_sleep_start();
       }
     }
   }
 
   // === Check inactivity ===
   if (millis() - lastMotion > motionTimeout) {
-    Serial.println("🛑 No motion – going to sleep...");
+    Serial.println("🛑 No motion for " + String(motionTimeout / 1000) + " seconds.");
+    sleepNow();
+  }
 
-    // Battery status before sleep
-    sendBatteryStatus();
-
-    // Shutdown modem and GPS to save power
-    modem.gprsDisconnect();
-    GPSTurnOff();
-    // bool success = modem.poweroff();
-    if (!modem.poweroff()) {
-      Serial.println("Modem didn't respond, forcing power off...");
-      modemPowerOff();
-    }
-
-    // Prepare for wake on motion (SW-420 sensor, etc.)
-    esp_sleep_enable_ext0_wakeup(GPIO_NUM_32, 1); // modify pin as needed
-    delay(100);
-    esp_deep_sleep_start();
+  if (normalBoot) {
+    sleepNow();
   }
 
   mqttClient.loop();
 }
 
-// ---- Read battery voltage ----
-float ReadBatteryVoltage() {
-    analogSetAttenuation(ADC_ATTEN);
-    analogReadResolution(ADC_RES);
+void sleepNow () {
+  // Battery status before sleep
+  sendBatteryStatus();
 
-    uint32_t raw_mv = analogReadMilliVolts(BOARD_BAT_ADC_PIN);  // mV
-    float voltage = (raw_mv / 1000.0) * VOLTAGE_DIVIDER; // convert to volts
+  // Shutdown modem and GPS to save power
+  modem.gprsDisconnect();
+  // GPSTurnOff();
+  modem.disableGPS();
 
-    // sanity check
-    if (voltage < 2.5 || voltage > 5.0) return 0;
-    return voltage;
-}
 
-// ---- Convert voltage to percentage ----
-int BatteryPercent(float voltage) {
-    if (voltage <= 3.0) return 0;
-    if (voltage >= 4.2) return 100;
-    return (int)(((voltage - 3.0) / (4.2 - 3.0)) * 100);
+  Serial.println("Enter modem power off!");
+
+  if (modem.poweroff()) {
+      Serial.println("Modem enter power off modem!");
+  } else {
+      Serial.println("modem power off failed!");
+  }
+
+  delay(5000);
+
+  Serial.println("Check modem response .");
+  while (modem.testAT()) {
+      Serial.print("."); delay(500);
+  }
+  Serial.println("Modem is not response ,modem has sleep!");
+
+  delay(5000);
+
+  // Prepare for wake on motion (SW-420 sensor, etc.)
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+  // pinMode(GPIO_NUM_32, INPUT);
+  esp_sleep_enable_ext0_wakeup(GPIO_NUM_32, 1);
+  SerialAT.end();
+  btStop(); // Stop Bluetooth to save power
+  delay(200);
+  esp_deep_sleep_start();
+  Serial.println("This will never be printed");
 }

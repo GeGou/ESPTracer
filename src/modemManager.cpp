@@ -2,19 +2,21 @@
 #include "utilities.h"
 
 void modemPowerOn() {
-  pinMode(MODEM_PWRKEY_PIN, OUTPUT);
-  digitalWrite(MODEM_PWRKEY_PIN, LOW);
-  delay(1500);
-  digitalWrite(MODEM_PWRKEY_PIN, HIGH);
-  delay(1000);
+  pinMode(BOARD_PWRKEY_PIN, OUTPUT);
+  digitalWrite(BOARD_PWRKEY_PIN, LOW);
+  delay(100);
+  digitalWrite(BOARD_PWRKEY_PIN, HIGH);
+  delay(1000); // Delay time is critical for proper power on , 1000 ms
+  digitalWrite(BOARD_PWRKEY_PIN, LOW);
 }
 
-void modemPowerOff(){
-  pinMode(MODEM_PWRKEY_PIN, OUTPUT);
-  digitalWrite(MODEM_PWRKEY_PIN, LOW);
-  delay(1500);
-  digitalWrite(MODEM_PWRKEY_PIN, HIGH);
-  delay(1000);
+void modemPowerOff() {
+  pinMode(BOARD_PWRKEY_PIN, OUTPUT);
+  digitalWrite(BOARD_PWRKEY_PIN, LOW);    // hold low
+  delay(1500);                            // 1.5 sec pulse
+  digitalWrite(BOARD_PWRKEY_PIN, HIGH);   // release
+  delay(1000); // Wait for modem to power off
+
 }
 
 void modemRestart(){
@@ -36,7 +38,7 @@ void checkModemStatus() {
 void GPSTurnOn(void) {
   Serial.println("Start positioning . Make sure to locate outdoors.");
   // Enable the power to GPS
-  modem.sendAT("+SGPIO=0,4,1,1");
+  modem.sendAT("+SGPIO=0,4,1,1"); //modem.sendAT("+CGPIO=0,48,1,1");
   if (modem.waitResponse(10000L) != 1) {
     Serial.println(" SGPIO=0,4,1,1 false ");
   }
@@ -48,7 +50,7 @@ void GPSTurnOff(void) {
   // Disable GPS
   modem.disableGPS();
   // Disable the power to GPS
-  modem.sendAT("+SGPIO=0,4,1,0");
+  modem.sendAT("+SGPIO=0,4,1,0"); //modem.sendAT("+CGPIO=0,48,1,0");
   if (modem.waitResponse(10000L) != 1) {
     Serial.println(" SGPIO=0,4,1,0 false ");
   }

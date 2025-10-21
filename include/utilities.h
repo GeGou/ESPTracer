@@ -24,11 +24,12 @@ extern PubSubClient mqttClient;
 #define UART_BAUD        115200
 #define MODEM_TX_PIN     27
 #define MODEM_RX_PIN     26
-#define MODEM_PWRKEY_PIN 4
-#define MODEM_DTR_PIN    25
+#define MODEM_DTR_PIN    25 // Pin to control modem sleep (DTR)
 
-#define MODEM_GPS_EN_PIN 48
-#define MODEM_GPS_EN_LEVEL 1
+#define MODEM_GPS_EN_PIN 48 // Pin to enable/disable GPS
+#define MODEM_GPS_EN_LEVEL 1 // 1 = HIGH to enable GPS, 0 = LOW to enable GPS
+
+#define BOARD_PWRKEY_PIN 4  // Pin to control modem power on/off
 
 // --- LED ---
 #define BOARD_LED_PIN    12
