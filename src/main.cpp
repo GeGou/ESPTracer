@@ -94,14 +94,8 @@ void setup() {
   }
   
   // Enable GPS
-  // GPSTurnOn();
-  Serial.println("Enabling GPS/GNSS/GLONASS");
-  while (!modem.enableGPS()) {
-      Serial.print(".");
-  }
-  Serial.println();
-  Serial.println("GPS Enabled");
-  delay(500);
+  GPSTurnOn();
+  // delay(15000); // Wait for GPS to stabilize
 
   // Connect MQTT
   connectToMQTT();
@@ -147,8 +141,8 @@ void loop() {
     for (int8_t i = 15; i; i--) {
       Serial.println("Requesting current GPS/GNSS/GLONASS location");
       // Don't need all this data yet
-      if (modem.getGPS(&lat, &lon, &speed, &alt, &vsat, &usat, &accuracy,
-          &year, &month, &day, &hour, &min, &sec)) {
+      if (modem.getGPS(&lat, &lon, &speed, &alt, &vsat,
+        &usat, &accuracy,&year, &month, &day, &hour, &min, &sec)) {
         
         // Send over MQTT
         sendLocation(lat, lon, alt, speed, accuracy);
@@ -156,10 +150,11 @@ void loop() {
       } 
       else {
         Serial.println("Couldn't get GPS/GNSS/GLONASS location, retrying in 15s.");
-        delay(200); // wait before retry
-        // Trying to optimize battery life - better than delaying
-        esp_sleep_enable_timer_wakeup(15 * 1000000ULL);  // sleep for 15 sec and try again
-        esp_light_sleep_start();
+        delay(15000L);
+        // delay(200); // wait before retry
+        // // Trying to optimize battery life - better than delaying
+        // esp_sleep_enable_timer_wakeup(15 * 1000000ULL);  // sleep for 15 sec and try again
+        // esp_light_sleep_start();
       }
     }
   }
@@ -183,8 +178,8 @@ void sleepNow () {
 
   // Shutdown modem and GPS to save power
   modem.gprsDisconnect();
-  // GPSTurnOff();
-  modem.disableGPS();
+  GPSTurnOff();
+  // modem.disableGPS();
 
 
   Serial.println("Enter modem power off!");
@@ -206,7 +201,7 @@ void sleepNow () {
   delay(5000);
 
   // Prepare for wake on motion (SW-420 sensor, etc.)
-  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);  // Disable all wakeup sources before enabling the one we want
   // pinMode(GPIO_NUM_32, INPUT);
   esp_sleep_enable_ext0_wakeup(GPIO_NUM_32, 1);
   SerialAT.end();

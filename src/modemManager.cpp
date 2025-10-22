@@ -10,6 +10,14 @@ void modemPowerOn() {
   digitalWrite(BOARD_PWRKEY_PIN, LOW);
 }
 
+// Alternative modem power on by DTR pin
+// void modemPowerOn() {
+//   pinMode(BOARD_PWRKEY_PIN, OUTPUT);
+//   digitalWrite(BOARD_PWRKEY_PIN, HIGH);
+//   delay(1000);    //Datasheet Ton mintues = 1S
+//   digitalWrite(BOARD_PWRKEY_PIN, LOW);
+// }
+
 void modemPowerOff() {
   pinMode(BOARD_PWRKEY_PIN, OUTPUT);
   digitalWrite(BOARD_PWRKEY_PIN, LOW);    // hold low
@@ -18,6 +26,14 @@ void modemPowerOff() {
   delay(1000); // Wait for modem to power off
 
 }
+
+// Alternative modem power off by DTR pin
+// void modemPowerOff() {
+//   pinMode(BOARD_PWRKEY_PIN, OUTPUT);
+//   digitalWrite(BOARD_PWRKEY_PIN, HIGH);
+//   delay(1500);    //Datasheet Ton mintues = 1.2S
+//   digitalWrite(BOARD_PWRKEY_PIN, LOW);
+// }
 
 void modemRestart(){
   modemPowerOff();
