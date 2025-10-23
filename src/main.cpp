@@ -3,7 +3,6 @@
 #include "utilities.h"
 #include "modemManager.h"
 #include "mqttManager.h"
-// #include "MPU6050.h"
 #include <BLEDevice.h>
 // #include <WiFi.h>
 // #include <WiFiClient.h>
@@ -21,13 +20,17 @@ bool keyFobFound = false;
 unsigned long sendInterval = 15000; // κάθε 15s
 unsigned long lastSend = 0;
 unsigned long lastMotion = 0;
-const unsigned long motionTimeout = 60 * 1000UL; // 1 λεπτό
+const unsigned long motionTimeout = 2 * 60 * 1000UL; // 2 λεπτά
 
 // === FUNCTIONS ===
 void sleepNow();
 
 bool firstBoot = true;
 bool normalBoot = false;
+
+void IRAM_ATTR ON_MOTION_DETECTED() {
+  lastMotion = millis();
+}
 
 void setup() {
   Serial.begin(115200);
@@ -45,6 +48,10 @@ void setup() {
   } else {
     Serial.println("Wakeup from EXT0 (motion)");
   }
+
+  // Set motion detection
+  pinMode(MOTION_INT_PIN, INPUT);
+  attachInterrupt(digitalPinToInterrupt(MOTION_INT_PIN), ON_MOTION_DETECTED, RISING);
 
   // Pull down DTR to ensure the modem is not in sleep state
   pinMode(MODEM_DTR_PIN, OUTPUT);
@@ -95,7 +102,7 @@ void setup() {
   
   // Enable GPS
   GPSTurnOn();
-  // delay(15000); // Wait for GPS to stabilize
+  delay(5000); // Wait for GPS to stabilize
 
   // Connect MQTT
   connectToMQTT();
@@ -108,7 +115,7 @@ void setup() {
   pBLEScan->setInterval(100);  // Set scan interval to 100ms
   pBLEScan->setWindow(99);   // Set scan window to 99ms (less or equal to setInterval value)
 
-  BLEScanResults results = pBLEScan->start(3, false);
+  BLEScanResults results = pBLEScan->start(5, false);
   keyFobFound = false;
   for (int i = 0; i < results.getCount(); i++) {
     BLEAdvertisedDevice device = results.getDevice(i);
@@ -117,12 +124,15 @@ void setup() {
     }
   }
   sendKeyFobStatus(keyFobFound);
+  delay(500);
 
   // Battery status every time ESP wakes up
   sendBatteryStatus();
+  delay(500);
 
   // Modem status every time ESP wakes up
   sendModemStatus();
+  delay(500);
 
   lastMotion = millis();
 }
@@ -130,7 +140,7 @@ void setup() {
 void loop() {
 
   // === GPS ===
-  if (firstBoot || millis() - lastSend >= sendInterval) {
+  if (firstBoot || (millis() - lastSend >= sendInterval)) {
     firstBoot = false;
     lastSend = millis();
 
@@ -150,11 +160,11 @@ void loop() {
       } 
       else {
         Serial.println("Couldn't get GPS/GNSS/GLONASS location, retrying in 15s.");
-        delay(15000L);
-        // delay(200); // wait before retry
-        // // Trying to optimize battery life - better than delaying
-        // esp_sleep_enable_timer_wakeup(15 * 1000000ULL);  // sleep for 15 sec and try again
-        // esp_light_sleep_start();
+        // delay(15000L);
+        delay(200); // wait before retry
+        // Trying to optimize battery life - better than delaying
+        esp_sleep_enable_timer_wakeup(15 * 1000000ULL);  // sleep for 15 sec and try again
+        esp_light_sleep_start();
       }
     }
   }
@@ -179,18 +189,16 @@ void sleepNow () {
   // Shutdown modem and GPS to save power
   modem.gprsDisconnect();
   GPSTurnOff();
-  // modem.disableGPS();
-
 
   Serial.println("Enter modem power off!");
 
   if (modem.poweroff()) {
-      Serial.println("Modem enter power off modem!");
+      Serial.println("Modem enter power off mode!");
   } else {
-      Serial.println("modem power off failed!");
+      Serial.println("Modem power off failed!");
   }
 
-  delay(5000);
+  delay(2000);
 
   Serial.println("Check modem response .");
   while (modem.testAT()) {
@@ -198,7 +206,7 @@ void sleepNow () {
   }
   Serial.println("Modem is not response ,modem has sleep!");
 
-  delay(5000);
+  delay(1000);
 
   // Prepare for wake on motion (SW-420 sensor, etc.)
   esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);  // Disable all wakeup sources before enabling the one we want
