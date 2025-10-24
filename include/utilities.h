@@ -52,10 +52,11 @@ extern PubSubClient mqttClient;
 #define ADC_RES 12          // ADC resolution
 
 // --- SIGNAL STRENGTH ---
-#define BLE_EXCELLENT_SIGNAL -30    // Do not change this value
-#define BLE_GOOD_SIGNAL      -67    // Do not change this value
-#define BLE_FAIR_SIGNAL      -70    // Do not change this value
-#define BLE_WEAK_SIGNAL      -80    // Do not change this value
-#define BLE_NO_SIGNAL        -90    // Do not change this value
+#define BLE_EXCELLENT_SIGNAL -50    // Very close
+#define BLE_GOOD_SIGNAL      -67    // 2-3 meters away
+#define BLE_FAIR_SIGNAL      -70    // 3-4 meters away
+#define BLE_WEAK_SIGNAL      -80    // 4-6 meters away
+#define BLE_NO_SIGNAL        -90    // Out of range
 
-#define BLE_RSSI BLE_GOOD_SIGNAL    // Select wanted signal level
+// The better the signal level, the closer the BLE Tag need to be
+#define BLE_RSSI -85    // Select wanted signal level

@@ -119,14 +119,20 @@ void setup() {
   // === BLE key fob scan - Every time ESP wakes up ===
   BLEDevice::init("");
   pBLEScan = BLEDevice::getScan();
-  pBLEScan->setActiveScan(true);
+  pBLEScan->setActiveScan(false); // Passive scan to save power - Usually finds devices correctly
   pBLEScan->setInterval(100);  // Set scan interval to 100ms
   pBLEScan->setWindow(99);   // Set scan window to 99ms (less or equal to setInterval value)
 
+  // Scan for BLE devices for 5 seconds and in blocking mode
   BLEScanResults results = pBLEScan->start(5, false);
   keyFobFound = false;
   for (int i = 0; i < results.getCount(); i++) {
     BLEAdvertisedDevice device = results.getDevice(i);
+    
+    if (device.getAddress().toString() == KEYFOB_MAC_ADDRESS) {
+      Serial.println("Found key fob with RSSI: " + String(device.getRSSI()));
+    }
+
     if (device.getAddress().toString() == KEYFOB_MAC_ADDRESS && device.getRSSI() > BLE_RSSI) {
       keyFobFound = true;
     }
