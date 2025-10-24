@@ -12,6 +12,9 @@
 
 // // PubSubClient mqttClient(wifiClient);
 
+// === FUNCTIONS ===
+void sleepNow();
+
 // ==== BLE Key Fob ====
 BLEScan* pBLEScan;
 bool keyFobFound = false;
@@ -22,14 +25,20 @@ unsigned long lastSend = 0;
 unsigned long lastMotion = 0;
 const unsigned long motionTimeout = 2 * 60 * 1000UL; // 2 λεπτά
 
-// === FUNCTIONS ===
-void sleepNow();
-
-bool firstBoot = true;
-bool normalBoot = false;
+volatile unsigned long lastMotionISR = 0;
+volatile bool motionDetected = false;
+volatile bool ignoreMotion = false;
 
 void IRAM_ATTR ON_MOTION_DETECTED() {
-  lastMotion = millis();
+  if (ignoreMotion) {
+    return; // Ignore motion detection during critical operations
+  }
+
+  unsigned long now = millis();
+  if (now - lastMotionISR > 500) {  // Ignore bounces within 500ms
+    motionDetected = true;
+    lastMotionISR = now;
+  }
 }
 
 void setup() {
@@ -43,14 +52,13 @@ void setup() {
 
   if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_EXT0) {
     Serial.println("Normal boot");
-    normalBoot = true;
 
   } else {
     Serial.println("Wakeup from EXT0 (motion)");
   }
 
   // Set motion detection
-  pinMode(MOTION_INT_PIN, INPUT);
+  pinMode(MOTION_INT_PIN, INPUT_PULLDOWN);
   attachInterrupt(digitalPinToInterrupt(MOTION_INT_PIN), ON_MOTION_DETECTED, RISING);
 
   // Pull down DTR to ensure the modem is not in sleep state
@@ -74,8 +82,7 @@ void setup() {
   digitalWrite(BOARD_LED_PIN, HIGH);
 
   // Unlock your SIM card with a PIN if needed
-  if (GSM_PIN && modem.getSimStatus() != 3)
-  {
+  if (GSM_PIN && modem.getSimStatus() != 3) {
     modem.simUnlock(GSM_PIN);
   }
 
@@ -83,7 +90,7 @@ void setup() {
 
   // Connect to network
   Serial.print("Trying to connect to APN: ");
-  Serial.print(APN);
+  Serial.println(APN);
   while (!modem.gprsConnect(APN, GPRS_USER, GPRS_PASS)) {
     Serial.println("GPRS connect failed, retrying...");
     Serial.println("signal quality: " + String(modem.getSignalQuality()));
@@ -102,7 +109,8 @@ void setup() {
   
   // Enable GPS
   GPSTurnOn();
-  delay(5000); // Wait for GPS to stabilize
+  delay(500); // Wait for GPS to stabilize
+
 
   // Connect MQTT
   connectToMQTT();
@@ -119,7 +127,7 @@ void setup() {
   keyFobFound = false;
   for (int i = 0; i < results.getCount(); i++) {
     BLEAdvertisedDevice device = results.getDevice(i);
-    if (device.getAddress().toString() == KEYFOB_MAC_ADDRESS && device.getRSSI() > -80) {
+    if (device.getAddress().toString() == KEYFOB_MAC_ADDRESS && device.getRSSI() > BLE_RSSI) {
       keyFobFound = true;
     }
   }
@@ -138,44 +146,43 @@ void setup() {
 }
 
 void loop() {
+  unsigned long now = millis();
+  
+  // Update last motion time if motion detected
+  if (motionDetected) {
+    lastMotion = now;
+    motionDetected = false;  
+    Serial.println("-> Motion detected! Timer reset. <-");
+  }
 
   // === GPS ===
-  if (firstBoot || (millis() - lastSend >= sendInterval)) {
-    firstBoot = false;
-    lastSend = millis();
+  if (now - lastSend >= sendInterval) {
+    ignoreMotion = true; // Disable motion detection
+    lastSend = now;
 
     // Read GPS location and send it over MQTT
     float lat=0, lon=0, speed=0, alt=0, accuracy=0;
     int   vsat=0, usat=0, year=0, month=0, day=0, hour=0, min=0, sec=0;
     
-    for (int8_t i = 15; i; i--) {
-      Serial.println("Requesting current GPS/GNSS/GLONASS location");
-      // Don't need all this data yet
-      if (modem.getGPS(&lat, &lon, &speed, &alt, &vsat,
-        &usat, &accuracy,&year, &month, &day, &hour, &min, &sec)) {
-        
-        // Send over MQTT
-        sendLocation(lat, lon, alt, speed, accuracy);
-        break;
-      } 
-      else {
-        Serial.println("Couldn't get GPS/GNSS/GLONASS location, retrying in 15s.");
-        // delay(15000L);
-        delay(200); // wait before retry
-        // Trying to optimize battery life - better than delaying
-        esp_sleep_enable_timer_wakeup(15 * 1000000ULL);  // sleep for 15 sec and try again
-        esp_light_sleep_start();
-      }
+    Serial.println("Requesting current GPS/GNSS/GLONASS location");
+    // Don't need all this data yet
+    if (modem.getGPS(&lat, &lon, &speed, &alt, &vsat,
+      &usat, &accuracy,&year, &month, &day, &hour, &min, &sec)) {
+      
+      // Send over MQTT
+      sendLocation(lat, lon, alt, speed, accuracy);
+      delay(3000);
+    } 
+    else {
+      Serial.println("Couldn't get GPS/GNSS/GLONASS location, retrying in " + String(sendInterval / 1000) + "s.");
+      delay(1000);
     }
+    ignoreMotion = false; // Enable motion detection
   }
 
   // === Check inactivity ===
-  if (millis() - lastMotion > motionTimeout) {
+  if (now - lastMotion > motionTimeout) {
     Serial.println("🛑 No motion for " + String(motionTimeout / 1000) + " seconds.");
-    sleepNow();
-  }
-
-  if (normalBoot) {
     sleepNow();
   }
 
@@ -190,19 +197,20 @@ void sleepNow () {
   modem.gprsDisconnect();
   GPSTurnOff();
 
-  Serial.println("Enter modem power off!");
+  Serial.println("Shutting down modem to save power...");
 
   if (modem.poweroff()) {
-      Serial.println("Modem enter power off mode!");
+    Serial.println("Modem powered off!");
   } else {
-      Serial.println("Modem power off failed!");
+    Serial.println("Modem power off failed!");
   }
 
-  delay(2000);
+  // delay(2000);
 
   Serial.println("Check modem response .");
   while (modem.testAT()) {
-      Serial.print("."); delay(500);
+    Serial.print("."); 
+    delay(500);
   }
   Serial.println("Modem is not response ,modem has sleep!");
 
@@ -210,8 +218,9 @@ void sleepNow () {
 
   // Prepare for wake on motion (SW-420 sensor, etc.)
   esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);  // Disable all wakeup sources before enabling the one we want
-  // pinMode(GPIO_NUM_32, INPUT);
-  esp_sleep_enable_ext0_wakeup(GPIO_NUM_32, 1);
+  pinMode(MOTION_INT_PIN, INPUT_PULLUP); // Motion sensor connected to GPIO32
+  gpio_num_t motionPin = static_cast<gpio_num_t>(MOTION_INT_PIN);
+  esp_sleep_enable_ext0_wakeup(motionPin, 1);
   SerialAT.end();
   btStop(); // Stop Bluetooth to save power
   delay(200);

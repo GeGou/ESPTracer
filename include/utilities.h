@@ -50,3 +50,12 @@ extern PubSubClient mqttClient;
 #define ADC_ATTEN ADC_11db  // ADC attenuation
 #define VOLTAGE_DIVIDER 2.0 // Divider R1=R2=100k
 #define ADC_RES 12          // ADC resolution
+
+// --- SIGNAL STRENGTH ---
+#define BLE_EXCELLENT_SIGNAL -30    // Do not change this value
+#define BLE_GOOD_SIGNAL      -67    // Do not change this value
+#define BLE_FAIR_SIGNAL      -70    // Do not change this value
+#define BLE_WEAK_SIGNAL      -80    // Do not change this value
+#define BLE_NO_SIGNAL        -90    // Do not change this value
+
+#define BLE_RSSI BLE_GOOD_SIGNAL    // Select wanted signal level
