@@ -60,3 +60,5 @@ extern PubSubClient mqttClient;
 
 // The better the signal level, the closer the BLE Tag need to be
 #define BLE_RSSI -85    // Select wanted signal level
+
+#define uS_TO_S_FACTOR 1000UL  // Conversion factor for micro seconds to seconds

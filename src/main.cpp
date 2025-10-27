@@ -23,7 +23,7 @@ bool keyFobFound = false;
 unsigned long sendInterval = 15000; // κάθε 15s
 unsigned long lastSend = 0;
 unsigned long lastMotion = 0;
-const unsigned long motionTimeout = 2 * 60 * 1000UL; // 2 λεπτά
+const unsigned long motionTimeout = 2 * 60 * uS_TO_S_FACTOR; // 2 minutes
 
 volatile unsigned long lastMotionISR = 0;
 volatile bool motionDetected = false;
@@ -58,8 +58,8 @@ void setup() {
   }
 
   // Set motion detection
-  pinMode(MOTION_INT_PIN, INPUT_PULLDOWN);
-  attachInterrupt(digitalPinToInterrupt(MOTION_INT_PIN), ON_MOTION_DETECTED, RISING);
+  pinMode(MOTION_INT_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(MOTION_INT_PIN), ON_MOTION_DETECTED, FALLING);
 
   // Pull down DTR to ensure the modem is not in sleep state
   pinMode(MODEM_DTR_PIN, OUTPUT);
@@ -71,9 +71,21 @@ void setup() {
 
 
   Serial.println("Check modem online .");
+  int attempts = 0;
   while (!modem.testAT()) {
     Serial.print("."); 
     delay(500);
+    attempts++;
+    if (attempts > 10) {
+      Serial.println("Modem is not responding, trying modem restart!");
+      modem.restart();
+      delay(3000); // Wait for modem to restart
+    }
+    if (!modem.testAT()) {
+      Serial.println("Modem still not responding, restarting ESP32!");
+      ESP.restart();
+    }
+    break;
   }
   Serial.println("Modem is online!");
 
@@ -129,6 +141,7 @@ void setup() {
   for (int i = 0; i < results.getCount(); i++) {
     BLEAdvertisedDevice device = results.getDevice(i);
     
+    // For debugging purposes
     if (device.getAddress().toString() == KEYFOB_MAC_ADDRESS) {
       Serial.println("Found key fob with RSSI: " + String(device.getRSSI()));
     }
@@ -163,27 +176,29 @@ void loop() {
 
   // === GPS ===
   if (now - lastSend >= sendInterval) {
-    ignoreMotion = true; // Disable motion detection
+    ignoreMotion = true; // Ignore motion detection during critical operations
+    // detachInterrupt(digitalPinToInterrupt(MOTION_INT_PIN));
     lastSend = now;
 
     // Read GPS location and send it over MQTT
     float lat=0, lon=0, speed=0, alt=0, accuracy=0;
     int   vsat=0, usat=0, year=0, month=0, day=0, hour=0, min=0, sec=0;
     
-    Serial.println("Requesting current GPS/GNSS/GLONASS location");
+    Serial.println("Requesting current location");
     // Don't need all this data yet
     if (modem.getGPS(&lat, &lon, &speed, &alt, &vsat,
       &usat, &accuracy,&year, &month, &day, &hour, &min, &sec)) {
       
       // Send over MQTT
       sendLocation(lat, lon, alt, speed, accuracy);
-      delay(3000);
     } 
     else {
       Serial.println("Couldn't get GPS/GNSS/GLONASS location, retrying in " + String(sendInterval / 1000) + "s.");
-      delay(1000);
     }
+    delay(2000);
     ignoreMotion = false; // Enable motion detection
+    // pinMode(MOTION_INT_PIN, INPUT_PULLUP);
+    // attachInterrupt(digitalPinToInterrupt(MOTION_INT_PIN), ON_MOTION_DETECTED, FALLING);
   }
 
   // === Check inactivity ===
@@ -210,8 +225,6 @@ void sleepNow () {
   } else {
     Serial.println("Modem power off failed!");
   }
-
-  // delay(2000);
 
   Serial.println("Check modem response .");
   while (modem.testAT()) {
