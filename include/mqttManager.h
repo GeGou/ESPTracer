@@ -7,6 +7,7 @@ void sendLocation(float lat, float lng, float alt=0, float speed=0, float accura
 void sendKeyFobStatus(bool found);
 void sendBatteryStatus();
 void sendModemStatus();
+void sendDeviceStatus(bool sleeping);
 
 // Read battery voltage
 float ReadBatteryVoltage();

@@ -108,6 +108,18 @@ binary_sensor:
       manufacturer: "Custom"
       model: "LiLyGO T-SIM7000G"
 
+  # === DEVICE SLEEP / AWAKE STATUS ===
+  - name: "Device Sleeping"
+    unique_id: esptracer_sleeping_status
+    state_topic: "esptracer/status"
+    value_template: "{{ 'ON' if value_json.sleeping else 'OFF' }}"
+    icon: mdi:sleep
+    device:
+      identifiers: ["esptracer_device"]
+      name: "ESPTracer"
+      manufacturer: "Custom"
+      model: "LiLyGO T-SIM7000G"
+
 # === DEVICE TRACKER (MAP INTEGRATION) ===
 device_tracker:
   - name: "GPS Tracker"

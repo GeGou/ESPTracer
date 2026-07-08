@@ -13,6 +13,7 @@
 #define MQTT_TOPIC_KEYFOB "esptracer/keyfob"
 #define MQTT_TOPIC_BAT "esptracer/battery"
 #define MQTT_TOPIC_MODEM "esptracer/modem"
+#define MQTT_TOPIC_COMMAND "esptracer/command"
 
 // GPRS Settings
 #define GPRS_USER ""    // GPRS username, if required

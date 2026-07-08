@@ -1,6 +1,4 @@
-// ===========================================================
 // utilities.h – Custom definitions for TTGO T-SIM7000G
-// ===========================================================
 
 #pragma once
 #include <Arduino.h>
@@ -36,7 +34,8 @@ extern PubSubClient mqttClient;
 #define LED_ON           LOW
 
 // --- Motion sensor pin (Wake pin) ---
-#define MOTION_INT_PIN   32   // συνδέεις το INT από MPU6050 ή ADXL345 εδώ
+#define MOTION_INT_PIN   33   // συνδέεις το INT από MPU6050 ή ADXL345 εδώ
+// #define MPU6050_INT_PIN  33 
 
 // --- SD card SPI ---
 #define BOARD_MISO_PIN   2

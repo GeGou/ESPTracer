@@ -2,7 +2,6 @@
 #include <mqttManager.h>
 #include "config.h"
 #include "utilities.h"
-// #include <PubSubClient.h>
 
 TinyGsm modem(SerialAT);
 TinyGsmClient client(modem);
@@ -14,13 +13,14 @@ void callback(char* topic, byte* payload, unsigned int length) {
   for (int i = 0; i < length; i++) {
     message += (char)payload[i];
   }
+  
   // Serial.print("MQTT Message [");
   // Serial.print(topic);
   // Serial.print("]: ");
   // Serial.println(message);
 
   // Check for reboot command
-  if (String(topic) == "esptracer/command") {
+  if (String(topic) == MQTT_TOPIC_COMMAND) {
     message.trim();
     if (message.equalsIgnoreCase("reboot")) {
       Serial.println("Reboot command received via MQTT!");
@@ -44,7 +44,7 @@ void connectToMQTT() {
       mqttClient.subscribe(MQTT_TOPIC_BAT);
       mqttClient.subscribe(MQTT_TOPIC_MODEM);
       mqttClient.subscribe(MQTT_TOPIC_STATUS);
-      mqttClient.subscribe("esptracer/command");
+      mqttClient.subscribe(MQTT_TOPIC_COMMAND);
     } else {
       Serial.print("Failed to connect to MQTT broker. Error: ");
       Serial.println(mqttClient.state());
@@ -73,6 +73,23 @@ void sendBatteryStatus() {
   String payload = "{\"battery\": " + String(voltage, 2) + ", \"batteryLevel\": " + String(percent) + "}";
   mqttClient.publish(MQTT_TOPIC_BAT, payload.c_str());
   Serial.println("Battery voltage: " + String(voltage, 2) + " V (" + String(percent) + "%)");    
+}
+
+// Στέλνει την κατάσταση λειτουργίας της συσκευής (sleeping: true/false) στο MQTT_TOPIC_STATUS.
+// retain=true ώστε όποιος συνδεθεί στο topic να βλέπει αμέσως την τελευταία γνωστή κατάσταση.
+
+// FIX: προστέθηκε mqttClient.loop() + delay μετά το publish, γιατί σε cellular
+// σύνδεση (μέσω modem/AT) η μεταφορά του πακέτου έχει μεγαλύτερο latency απ' ό,τι
+// σε WiFi - χωρίς αυτό, το sleepNow() προχωρούσε αμέσως σε gprsDisconnect() πριν
+// προλάβει να ολοκληρωθεί πραγματικά η αποστολή του "sleeping" μηνύματος.
+void sendDeviceStatus(bool sleeping) {
+  String payload = "{\"sleeping\": " + String(sleeping ? "true" : "false") + "}";
+  bool ok = mqttClient.publish(MQTT_TOPIC_STATUS, payload.c_str(), true); // retained
+  Serial.println("🟢 Device status: " + String(sleeping ? "sleeping" : "awake") + (ok ? "" : " (publish failed)"));
+ 
+  mqttClient.loop();
+  delay(1000); // δίνουμε χρόνο στο modem/cellular link να ολοκληρώσει την αποστολή
+  mqttClient.loop();
 }
 
 void sendModemStatus() {

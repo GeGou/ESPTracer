@@ -10,14 +10,6 @@ void modemPowerOn() {
   digitalWrite(BOARD_PWRKEY_PIN, LOW);
 }
 
-// Alternative modem power on by DTR pin
-// void modemPowerOn() {
-//   pinMode(BOARD_PWRKEY_PIN, OUTPUT);
-//   digitalWrite(BOARD_PWRKEY_PIN, HIGH);
-//   delay(1000);    //Datasheet Ton mintues = 1S
-//   digitalWrite(BOARD_PWRKEY_PIN, LOW);
-// }
-
 void modemPowerOff() {
   pinMode(BOARD_PWRKEY_PIN, OUTPUT);
   digitalWrite(BOARD_PWRKEY_PIN, LOW);    // hold low
@@ -26,14 +18,6 @@ void modemPowerOff() {
   delay(1000); // Wait for modem to power off
 
 }
-
-// Alternative modem power off by DTR pin
-// void modemPowerOff() {
-//   pinMode(BOARD_PWRKEY_PIN, OUTPUT);
-//   digitalWrite(BOARD_PWRKEY_PIN, HIGH);
-//   delay(1500);    //Datasheet Ton mintues = 1.2S
-//   digitalWrite(BOARD_PWRKEY_PIN, LOW);
-// }
 
 void modemRestart(){
   modemPowerOff();
@@ -52,11 +36,13 @@ void checkModemStatus() {
 }
 
 void GPSTurnOn(void) {
-  Serial.println("Start positioning . Make sure to locate outdoors.");
+  Serial.println("Start positioning. Make sure to locate outdoors.");
   // Enable the power to GPS
-  modem.sendAT("+SGPIO=0,4,1,1"); //modem.sendAT("+CGPIO=0,48,1,1");
+  // Το antenna power switch στο board T-SIM7000G είναι στο modem GPIO 48,
+  // βλ. datasheet: "GPS Ant Power Enable | 48 | High | AT+CGPIO=0,48,1,1".
+  modem.sendAT("+CGPIO=0,48,1,1");
   if (modem.waitResponse(10000L) != 1) {
-    Serial.println(" SGPIO=0,4,1,1 false ");
+    Serial.println(" CGPIO=0,48,1,1 false ");
   }
   // Enable GPS
   modem.enableGPS();
@@ -66,8 +52,10 @@ void GPSTurnOff(void) {
   // Disable GPS
   modem.disableGPS();
   // Disable the power to GPS
-  modem.sendAT("+SGPIO=0,4,1,0"); //modem.sendAT("+CGPIO=0,48,1,0");
+  // Το antenna power switch στο board T-SIM7000G είναι στο modem GPIO 48,
+  // βλ. datasheet: "GPS Ant Power Enable | 48 | High | AT+CGPIO=0,48,1,0".
+  modem.sendAT("+CGPIO=0,48,1,0");
   if (modem.waitResponse(10000L) != 1) {
-    Serial.println(" SGPIO=0,4,1,0 false ");
+    Serial.println(" CGPIO=0,48,1,0 false ");
   }
 }
