@@ -4,55 +4,92 @@
 #include "modemManager.h"
 #include "mqttManager.h"
 #include <BLEDevice.h>
-#include <Wire.h>
 // #include <WiFi.h>
 // #include <WiFiClient.h>
 
+// ==================================================================
+// SENSOR SELECTION — ενεργοποίησε ό,τι θες. Στο μέλλον μπορείς να έχεις
+// και τους δύο ενεργούς ταυτόχρονα (π.χ. OR λογική στο interrupt) αν
+// αποφασίσεις να τους συνδυάσεις — προς το παρόν, αν ενεργοποιήσεις και
+// τους δύο, το WAKE_PIN παρακάτω θα δείχνει προσωρινά στον SW420_PIN.
+// ==================================================================
+#define USE_SW420
+// #define USE_MPU6050
 
-// // WiFiClient wifiClient;
-
-// // PubSubClient mqttClient(wifiClient);
+#ifdef USE_MPU6050
+#include <Wire.h> // MPU6050-specific: χρειάζεται I2C
+#endif
 
 // === FUNCTIONS ===
 void sleepNow();
 void scanForKeyFob();
-void writeMPU(uint8_t reg, uint8_t data);
-uint8_t readMPU(uint8_t reg);
-void setupMPUMotionInterrupt();
 void IRAM_ATTR onMotionISR();
+
+#ifdef USE_MPU6050
+void writeMPU(uint8_t reg, uint8_t data); // MPU6050-specific (I2C)
+uint8_t readMPU(uint8_t reg);              // MPU6050-specific (I2C)
+void setupMPUMotionInterrupt();            // MPU6050-specific
+#endif
+#ifdef USE_SW420
+void setupSW420MotionInterrupt();          // καθαρά digital, no I2C
+#endif
+
+// Ποιο pin χρησιμοποιείται τελικά για attachInterrupt / ext0 wakeup,
+// ανάλογα ποιος αισθητήρας είναι ενεργός.
+#if defined(USE_SW420) && defined(USE_MPU6050)
+  #define WAKE_PIN SW420_PIN // και οι δύο ενεργοί - προσωρινά προτεραιότητα στον SW420, βλ. σχόλιο combine-both στο μέλλον
+#elif defined(USE_SW420)
+  #define WAKE_PIN SW420_PIN
+#elif defined(USE_MPU6050)
+  #define WAKE_PIN MOTION_INT_PIN
+#else
+  #error "You must enable at least one of the USE_SW420 / USE_MPU6050"
+#endif
 
 // ==== BLE Key Fob ====
 BLEScan* pBLEScan;
 bool keyFobFound = false;
 
 // ==== Tracking ====
-unsigned long sendInterval = 15000; // κάθε 15s (GPS/MQTT tracking)
+unsigned long sendInterval = 15000; // κάθε 15s (GPS/MQTT tracking) - μόνο σε FULL mode
 unsigned long lastSend = 0;
 
-unsigned long bleRescanInterval = 30000; // κάθε 30s επανέλεγχος BLE key fob όσο είμαστε ξύπνιοι
+unsigned long bleRescanInterval = 30000; // κάθε 30s επανέλεγχος BLE key fob όσο είμαστε ξύπνιοι (FULL mode)
 unsigned long lastBleScan = 0;
 
 unsigned long lastMotion = 0;
 
-// FIX #1: to motionTimeout συγκρίνεται με millis() (ms), όχι micros().
-// Το προηγούμενο "2 * 60 * uS_TO_S_FACTOR" έκανε το timeout ~33 ώρες αντί για 2 λεπτά.
 const unsigned long motionTimeout = 1UL * 60UL * 1000UL; // 1 λεπτό σε ms
 
-// ==== Motion detection (MPU6050) ====
+// ==== Motion detection ====
 // Το ISR δεν κάνει I2C calls (ασφαλές μέσα σε interrupt context).
-// Απλά σηκώνει flag· ο καθαρισμός του MPU latch (I2C read) γίνεται στο loop().
+// Απλά σηκώνει flag - Ο καθαρισμός γίνεται στο loop() (μόνο για MPU6050, βλ. εκεί).
 volatile unsigned long lastMotionISR = 0;
 volatile bool motionFlag = false;
 
 void IRAM_ATTR onMotionISR() {
   unsigned long now = millis();
-  if (now - lastMotionISR > 1000) { // debounce 1000ms
+  if (now - lastMotionISR > 1000) { // hardware debounce 1000ms, μέσα στο ISR
     motionFlag = true;
     lastMotionISR = now;
   }
 }
 
+// ==================================================================
+// Software "consensus" φίλτρο κίνησης — μειώνει false timer resets από
+// μεμονωμένους κραδασμούς, χωρίς να αγγίζουμε το (ήδη πολύ ευαίσθητο)
+// ποτενσιόμετρο του SW-420. Μόνο αν συμβούν αρκετά motion events μέσα
+// σε ένα μικρό χρονικό παράθυρο θεωρούμε πραγματική, συνεχιζόμενη κίνηση
+// (π.χ. οδήγηση) και κάνουμε reset το inactivity timer.
+// ==================================================================
+const unsigned long MOTION_WINDOW_MS = 5000;  // παράθυρο ανάλυσης (5s)
+const int MOTION_CONSENSUS_COUNT = 3;         // ελάχιστα events μέσα στο παράθυρο
+unsigned long motionWindowStart = 0;
+int motionEventsInWindow = 0;
+
+#ifdef USE_MPU6050
 //////////////////////////////////////
+// ---- MPU6050-specific I2C helpers: ΔΕΝ χρειάζονται καθόλου με τον SW-420 ----
 void writeMPU(uint8_t reg, uint8_t data) {
   Wire.beginTransmission(0x68);
   Wire.write(reg);
@@ -72,48 +109,46 @@ uint8_t readMPU(uint8_t reg) {
 }
 
 void setupMPUMotionInterrupt() {
-  // FIX #8 (immediate re-wake bug): η σειρά έχει αλλάξει ώστε το power-mode transition
-  // (cycle mode) να ολοκληρωθεί και να "settle" ΠΡΙΝ ενεργοποιήσουμε το motion interrupt.
-  // Το να ανάβεις το interrupt ενώ το accel μόλις άλλαξε power mode είναι ό,τι προκαλούσε
-  // ένα ψευδές motion event να κολλήσει latched στο INT pin, με αποτέλεσμα το ext0
-  // (level-triggered) να ξυπνάει το ESP32 αμέσως μόλις έμπαινε σε deep sleep.
-
   writeMPU(0x6B, 0x00);   // PWR_MGMT_1: exit sleep, internal 8MHz osc
   delay(10);
 
-  writeMPU(0x6C, 0x07);   // PWR_MGMT_2: STBY_XG/YG/ZG=1 -> gyro OFF, accel only (FIX #7, μέρος 1)
+  writeMPU(0x6C, 0x07);   // PWR_MGMT_2: STBY_XG/YG/ZG=1 -> gyro OFF, accel only
   writeMPU(0x1C, 0x00);   // ACCEL_CONFIG: ±2g (μέγιστη ευαισθησία)
+  // writeMPU(0x1C, 0x08);  // AFS_SEL=1 -> ±4g, λιγότερο ευαίσθητο σε μικροθόρυβο
 
-  writeMPU(0x1F, 10);     // MOT_THR: motion threshold (~320mg). Ρύθμισέ το εμπειρικά.
-  writeMPU(0x20, 80);     // MOT_DUR: motion duration ~80ms, φιλτράρει μεμονωμένα spikes
+  writeMPU(0x1F, 35);     // MOT_THR: motion threshold (~70mg). Ρύθμισέ το εμπειρικά.
+  writeMPU(0x20, 30);     // MOT_DUR: motion duration ~30ms, φιλτράρει μεμονωμένα spikes
 
   writeMPU(0x69, 0x15);   // MOT_DETECT_CTRL
 
-  // FIX #5 (διορθωμένο): INT_PIN_CFG. Η τιμή 0xA0 (bit7=1) ήταν λάθος -> INT_LEVEL=1
-  // σημαίνει active-LOW, δηλαδή το pin idle-άρει HIGH μόνιμα και πέφτει LOW μόνο όσο
-  // διαρκεί το interrupt. Αυτό έκανε το ext0 (wake on HIGH) να ξυπνάει αμέσως, αφού
-  // το idle state ήταν ήδη HIGH ανεξαρτήτως πραγματικής κίνησης.
-  // Σωστή τιμή 0x30 = 0b00110000: INT_LEVEL=0 (active-high, idle LOW), INT_OPEN=0
-  // (push-pull), LATCH_INT_EN=1 (μένει HIGH μέχρι clear), INT_RD_CLEAR=1 (clear σε
-  // οποιοδήποτε read).
-  writeMPU(0x37, 0x30);
+  writeMPU(0x37, 0x30);   // INT_PIN_CFG: active-high, push-pull, latch, clear-on-read
 
-  // FIX #7, μέρος 2: Cycle mode - accel-only low power sampling (CYCLE bit).
-  // Ενεργοποιείται ΠΡΙΝ το INT_ENABLE, και αφήνουμε χρόνο να σταθεροποιηθεί η
-  // δειγματοληψία πριν οπλίσουμε το interrupt (FIX #8).
-  // LP_WAKE_CTRL (bits 7:6 του 0x6C): 00=1.25Hz, 01=5Hz, 10=20Hz, 11=40Hz.
   writeMPU(0x6C, 0x87);   // STBY_XG/YG/ZG=1 (0x07) | LP_WAKE_CTRL=10 (20Hz) => 0x87
   writeMPU(0x6B, 0x20);   // PWR_MGMT_1: CYCLE=1
-  delay(100);             // FIX #8: settle time πριν ενεργοποιήσουμε το interrupt
+  delay(100);             // settle time πριν ενεργοποιήσουμε το interrupt
 
   writeMPU(0x38, 0x40);   // INT_ENABLE: motion interrupt enabled (οπλίζεται τελευταίο)
 
-  // Clear τυχόν transient interrupt που προκλήθηκε από τη μετάβαση config/power-mode
-  readMPU(0x3A); // INT_STATUS (clear-on-read)
+  readMPU(0x3A); // INT_STATUS (clear-on-read) - καθαρίζει τυχόν transient interrupt
 
-  pinMode(MOTION_INT_PIN, INPUT); // INT pin (push-pull, δεν χρειάζεται pull-up/down)
+  pinMode(MOTION_INT_PIN, INPUT);
 }
 ////////////////////////////////////////
+#endif // USE_MPU6050
+
+#ifdef USE_SW420
+// ==================================================================
+// SW-420 setup.
+// ΕΠΙΒΕΒΑΙΩΜΕΝΗ πολικότητα στο δικό σου module (μέσω sw420_test.cpp):
+//   idle  = LOW
+//   pulse = HIGH (πολύ σύντομο, μερικά ms, σε κάθε δόνηση/χτύπημα)
+// Άρα: RISING edge για το interrupt, και ext0 wake on HIGH (1).
+// Η ευαισθησία ρυθμίζεται ΜΟΝΟ με το ποτενσιόμετρο πάνω στο module.
+// ==================================================================
+void setupSW420MotionInterrupt() {
+  pinMode(SW420_PIN, INPUT); // #define SW420_PIN <GPIO> στο config.h
+}
+#endif // USE_SW420
 
 void scanForKeyFob() {
   keyFobFound = false;
@@ -138,8 +173,13 @@ void setup() {
   Serial.begin(115200);
   Serial.println("ESPTracer starting...");
 
+#ifdef USE_MPU6050
   Wire.begin(21, 22); // SDA, SCL
   setupMPUMotionInterrupt();
+#endif
+#ifdef USE_SW420
+  setupSW420MotionInterrupt();
+#endif
 
   SerialAT.begin(115200, SERIAL_8N1, MODEM_RX_PIN, MODEM_TX_PIN);
 
@@ -152,8 +192,31 @@ void setup() {
     Serial.println("Wakeup from EXT0 (motion)");
   }
 
-  // Ενεργοποίηση interrupt ώστε να ανιχνεύουμε κίνηση και ενώ είμαστε ξύπνιοι
-  attachInterrupt(digitalPinToInterrupt(MOTION_INT_PIN), onMotionISR, RISING);
+  // Ενεργοποίηση interrupt ώστε να ανιχνεύσει κίνηση και ενώ είναι awake
+  attachInterrupt(digitalPinToInterrupt(WAKE_PIN), onMotionISR, RISING);
+
+  // ==================================================================
+  // === BLE key fob scan — γίνεται ΠΡΩΤΑ, πριν ανάψει το modem/GPS ===
+  // Το BLE scan είναι στο ESP32 (χαμηλή κατανάλωση), ενώ το modem SIM7000
+  // κοστίζει πολύ περισσότερο. Ελέγχοντας το keyfob πρώτα αποφασίζουμε ΑΝ
+  // χρειάζεται καν πλήρες tracking session, πριν ξοδέψουμε ενέργεια.
+  // ==================================================================
+  BLEDevice::init("");
+  pBLEScan = BLEDevice::getScan();
+  pBLEScan->setActiveScan(false); // Passive scan to save power
+  pBLEScan->setInterval(100);
+  pBLEScan->setWindow(99);
+
+  scanForKeyFob();
+  lastBleScan = millis();
+
+  // Αν βρέθηκε το keyfob, θέλουμε "light" mode: μία αναφορά θέσης πριν τον ύπνο, όχι συνεχές tracking.
+  bool lightMode = keyFobFound;
+  if (lightMode) {
+    Serial.println("Keyfob found -> LIGHT mode (one location report before sleep).");
+  } else {
+    Serial.println("Keyfob not found -> FULL tracking mode.");
+  }
 
   // Pull down DTR to ensure the modem is not in sleep state
   pinMode(MODEM_DTR_PIN, OUTPUT);
@@ -163,8 +226,6 @@ void setup() {
   modemPowerOn();
   delay(5000); // Wait for modem to start
 
-  // Ο βρόχος επαναλαμβάνεται, κάνει modem.restart() κάθε 10 αποτυχίες, και μόνο
-  // μετά από 20 αποτυχίες κάνει ESP.restart().
   Serial.println("Check modem online.");
   int attempts = 0;
   bool modemOK = modem.testAT();
@@ -205,7 +266,7 @@ void setup() {
   while (!modem.gprsConnect(APN, GPRS_USER, GPRS_PASS)) {
     Serial.println("GPRS connect failed, retrying...");
     Serial.println("signal quality: " + String(modem.getSignalQuality()));
-    checkModemStatus();   // Need to check that function
+    checkModemStatus();
     delay(4000);
   }
 
@@ -226,40 +287,74 @@ void setup() {
   connectToMQTT();
   delay(500);
 
-  // μόλις συνδεθούμε, δηλώνουμε στο MQTT ότι η συσκευή είναι ξύπνια/tracking
   sendDeviceStatus(false); // sleeping = false
 
-  // === BLE key fob scan - πρώτος έλεγχος κατά την αφύπνιση ===
-  BLEDevice::init("");
-  pBLEScan = BLEDevice::getScan();
-  pBLEScan->setActiveScan(false); // Passive scan to save power
-  pBLEScan->setInterval(100);
-  pBLEScan->setWindow(99);
-
-  scanForKeyFob();
-  lastBleScan = millis();
-  delay(500);
-
-  // Battery status every time ESP wakes up
   sendBatteryStatus();
   delay(500);
 
-  // Modem status every time ESP wakes up
   sendModemStatus();
   delay(500);
 
   lastMotion = millis();
+  motionWindowStart = millis();
+  motionEventsInWindow = 0;
+
+  // ==================================================================
+  // LIGHT MODE: keyfob βρέθηκε -> μία αναφορά θέσης, μετά κατευθείαν sleep.
+  // Δεν μπαίνουμε καθόλου στο loop() σε αυτή την περίπτωση.
+  //
+  // TRADE-OFF: αν το keyfob παραμένει «βρεθέν» καθ' όλη τη διάρκεια της
+  // διαδρομής, το SW-420 θα ξυπνάει τη συσκευή σε κάθε κραδασμό/κίνηση,
+  // και ΚΑΘΕ wake θα κάνει πλήρη κύκλο modem-on / GPS-fix / MQTT-send πριν
+  // ξανακοιμηθεί. Αυτό μπορεί να καταναλώνει ΠΕΡΙΣΣΟΤΕΡΗ μπαταρία από το
+  // συνεχές FULL tracking, γιατί το "άναμμα" του modem/GPRS κοστίζει πολύ.
+  // Αν το δεις να αδειάζει γρήγορα η μπαταρία σε πραγματικό ταξίδι, πες μου
+  // να προσθέσουμε ένα cooldown (π.χ. min 5-10 λεπτά ανάμεσα σε reports).
+  // ==================================================================
+  if (lightMode) {
+    float lat = 0, lon = 0, speed = 0, alt = 0, accuracy = 0;
+    int   vsat = 0, usat = 0, year = 0, month = 0, day = 0, hour = 0, min = 0, sec = 0;
+
+    Serial.println("LIGHT mode: requesting one-shot location before sleep...");
+    if (modem.getGPS(&lat, &lon, &speed, &alt, &vsat,
+      &usat, &accuracy, &year, &month, &day, &hour, &min, &sec)) {
+      sendLocation(lat, lon, alt, speed, accuracy);
+    } else {
+      Serial.println("LIGHT mode: no GPS fix found, sleeping without location.");
+    }
+    delay(500);
+
+    sleepNow(); // deep sleep — δεν επιστρέφει, το loop() δεν τρέχει καθόλου σε αυτόν τον κύκλο
+    return;     // φρουρός, ποτέ δεν φτάνει εδώ στην πράξη
+  }
+
+  // FULL mode: συνεχίζουμε κανονικά, το loop() θα αναλάβει το tracking
 }
 
 void loop() {
   unsigned long now = millis();
 
-  // Update last motion time if motion detected
+  // Update last motion time if motion detected — με software consensus φίλτρο
   if (motionFlag) {
     motionFlag = false;
-    readMPU(0x3A); // INT_STATUS: clear-on-read, ξεκλειδώνει το latch για το επόμενο event
-    lastMotion = now;
-    Serial.println("🟡 Motion detected! Timer reset.");
+#ifdef USE_MPU6050
+    readMPU(0x3A); // INT_STATUS: clear-on-read -- MPU6050-specific
+#endif
+    // SW-420 NOTE: δεν χρειάζεται κανένα clear-on-read - το DO pin δεν κάνει latch.
+    if (now - motionWindowStart > MOTION_WINDOW_MS) {
+      motionWindowStart = now;
+      motionEventsInWindow = 1;
+    } else {
+      motionEventsInWindow++;
+    }
+
+    if (motionEventsInWindow >= MOTION_CONSENSUS_COUNT) {
+      lastMotion = now; // "πραγματική" συνεχιζόμενη κίνηση επιβεβαιωμένη
+      Serial.println("Confirmed motion (consensus) - Timer reset.");
+    } else {
+      Serial.println("Motion event (" + String(motionEventsInWindow) + "/" +
+                      String(MOTION_CONSENSUS_COUNT) + ") - waiting for consensus.");
+    }
   }
 
   // === BLE rescan - περιοδικός επανέλεγχος όσο παραμένουμε ξύπνιοι ===
@@ -267,21 +362,20 @@ void loop() {
     lastBleScan = now;
     Serial.println("Re-scanning for key fob...");
     scanForKeyFob();
+    // Σημείωση: εδώ θα μπορούσαμε στο μέλλον να μεταβούμε από FULL σε LIGHT
+    // αν το keyfob ξαναβρεθεί μέσα σε ένα FULL tracking session.
   }
 
-  // === GPS ===
+  // === GPS === (μόνο σε FULL mode, αφού το loop() τρέχει μόνο τότε)
   if (now - lastSend >= sendInterval) {
     lastSend = now;
 
-    // Read GPS location and send it over MQTT
     float lat = 0, lon = 0, speed = 0, alt = 0, accuracy = 0;
     int   vsat = 0, usat = 0, year = 0, month = 0, day = 0, hour = 0, min = 0, sec = 0;
 
     Serial.println("Requesting current location");
     if (modem.getGPS(&lat, &lon, &speed, &alt, &vsat,
       &usat, &accuracy, &year, &month, &day, &hour, &min, &sec)) {
-
-      // Send over MQTT
       sendLocation(lat, lon, alt, speed, accuracy);
     } else {
       Serial.println("Couldn't get GPS/GNSS/GLONASS location, retrying in " + String(sendInterval / 1000) + "s.");
@@ -290,7 +384,7 @@ void loop() {
 
   // === Check inactivity ===
   if (now - lastMotion > motionTimeout) {
-    Serial.println("Stop No motion for " + String(motionTimeout / 1000) + " seconds.");
+    Serial.println("Stop - No motion for " + String(motionTimeout / 1000) + " seconds.");
     sleepNow();
   }
 
@@ -298,26 +392,16 @@ void loop() {
 }
 
 void sleepNow() {
-  detachInterrupt(digitalPinToInterrupt(MOTION_INT_PIN));
+  detachInterrupt(digitalPinToInterrupt(WAKE_PIN));
 
-  // δηλώνουμε "sleeping" στο MQTT ΠΡΙΝ κλείσουμε modem/GPRS - αλλιώς δεν
-  // προλαβαίνει να φύγει το μήνυμα, αφού μετά χάνεται η σύνδεση. Η ίδια η
-  // sendDeviceStatus() κάνει ήδη mqttClient.loop()+delay(1000)+loop() εσωτερικά
-  // για να δώσει χρόνο στο modem να ολοκληρώσει την αποστολή.
   sendDeviceStatus(true); // sleeping = true
-
-  // Battery status before sleep
   sendBatteryStatus();
 
-  // Shutdown modem and GPS to save power
   modem.gprsDisconnect();
   GPSTurnOff();
 
   Serial.println("Shutting down modem to save power...");
 
-  // Κάνουμε έως 3 προσπάθειες poweroff, με bounded wait στην καθεμία, και αν όλες 
-  // αποτύχουν προχωράμε στο deep sleep όπως και να 'χει.
-  // (καλύτερα να προσπαθήσουμε ξανά στον επόμενο κύκλο, παρά να μείνουμε κολλημένοι).
   bool modemOff = false;
   for (int offTry = 0; offTry < 3 && !modemOff; offTry++) {
     if (modem.poweroff()) {
@@ -328,7 +412,7 @@ void sleepNow() {
 
     Serial.println("Check modem response.");
     int offAttempts = 0;
-    while (modem.testAT() && offAttempts < 20) { // μέγιστη αναμονή ~10s ανά προσπάθεια
+    while (modem.testAT() && offAttempts < 20) {
       Serial.print(".");
       delay(500);
       offAttempts++;
@@ -348,32 +432,29 @@ void sleepNow() {
 
   delay(1000);
 
-  // Prepare for wake on motion (MPU6050 INT pin)
   esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
 
-  // (immediate re-wake bug): ΔΕΝ ξανατρέχουμε setupMPUMotionInterrupt() εδώ.
-  // Το MPU6050 τροφοδοτείται ανεξάρτητα από το ESP32 και κρατάει ήδη τη ρύθμιση από
-  // το setup()· το να ξαναγράφεις PWR_MGMT_1/2 (cycle mode) ακριβώς πριν τον ύπνο είναι
-  // ό,τι προκαλούσε ένα ψευδές motion event να μείνει latched στο INT pin, με αποτέλεσμα
-  // το ext0 (level-triggered) να ξυπνάει το ESP32 αμέσως.
-  // Αρκεί να καθαρίσουμε το latch και να επιβεβαιώσουμε ότι το pin είναι πραγματικά LOW.
+#ifdef USE_MPU6050
   readMPU(0x3A); // INT_STATUS clear-on-read
   delay(50);
 
   int clearAttempts = 0;
-  while (digitalRead(MOTION_INT_PIN) == HIGH && clearAttempts < 5) {
-    Serial.println("MPU INT ακόμα HIGH, ξανακαθαρίζω...");
+  while (digitalRead(WAKE_PIN) == HIGH && clearAttempts < 5) {
+    Serial.println("MPU INT still HIGH, clearing...");
     readMPU(0x3A);
     delay(50);
     clearAttempts++;
   }
 
-  if (digitalRead(MOTION_INT_PIN) == HIGH) {
-    Serial.println("ΠΡΟΣΟΧΗ: MPU INT παραμένει HIGH - το ESP32 πιθανόν να ξυπνήσει αμέσως.");
+  if (digitalRead(WAKE_PIN) == HIGH) {
+    Serial.println("Warning: MPU INT is HIGH - the ESP32 might wake up immediately.");
   }
+#endif
+  // SW-420 NOTE: δεν χρειάζεται κανένα clear latch / retry εδώ - το pin
+  // επιστρέφει μόνο του στο idle (LOW), δεν υπάρχει latch σε mechanical switch.
 
-  gpio_num_t motionPin = static_cast<gpio_num_t>(MOTION_INT_PIN);
-  esp_sleep_enable_ext0_wakeup(motionPin, 1);
+  gpio_num_t motionPin = static_cast<gpio_num_t>(WAKE_PIN);
+  esp_sleep_enable_ext0_wakeup(motionPin, 1); // wake on HIGH
 
   SerialAT.end();
   btStop(); // Stop Bluetooth to save power

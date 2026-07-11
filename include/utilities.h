@@ -37,6 +37,8 @@ extern PubSubClient mqttClient;
 #define MOTION_INT_PIN   33   // συνδέεις το INT από MPU6050 ή ADXL345 εδώ
 // #define MPU6050_INT_PIN  33 
 
+#define SW420_PIN  32   // συνδέεις το OUT από SW-420 εδώ (αν χρησιμοποιήσεις SW-420 αντί για MPU6050)
+
 // --- SD card SPI ---
 #define BOARD_MISO_PIN   2
 #define BOARD_MOSI_PIN   15

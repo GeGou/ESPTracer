@@ -63,7 +63,12 @@ void sendLocation(float lat, float lng, float alt, float speed, float accuracy) 
 void sendKeyFobStatus(bool found) {
   String payload = "{\"status\":\"" + String(found ? "found" : "not_found") + "\"}";
   mqttClient.publish(MQTT_TOPIC_KEYFOB, payload.c_str());
-  Serial.println("🔵 BLE key fob: " + String(found ? "found" : "not_found"));
+  if (found) {
+    Serial.println("🔵 BLE key fob: found");
+  } else {
+    Serial.println("🔴 BLE key fob: not found");
+  }
+  // Serial.println("🔵 BLE key fob: " + String(found ? "found" : "not_found"));
 }
 
 void sendBatteryStatus() {
@@ -85,7 +90,12 @@ void sendBatteryStatus() {
 void sendDeviceStatus(bool sleeping) {
   String payload = "{\"sleeping\": " + String(sleeping ? "true" : "false") + "}";
   bool ok = mqttClient.publish(MQTT_TOPIC_STATUS, payload.c_str(), true); // retained
-  Serial.println("🟢 Device status: " + String(sleeping ? "sleeping" : "awake") + (ok ? "" : " (publish failed)"));
+  if (ok) {
+    Serial.println("🟢 Device status: " + String(sleeping ? "sleeping" : "awake"));
+  } else {
+    Serial.println("🔴 Device status publish failed!");
+  }
+  // Serial.println("🟢 Device status: " + String(sleeping ? "sleeping" : "awake") + (ok ? "" : " (publish failed)"));
  
   mqttClient.loop();
   delay(1000); // δίνουμε χρόνο στο modem/cellular link να ολοκληρώσει την αποστολή
