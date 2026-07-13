@@ -2,6 +2,7 @@
 #include <mqttManager.h>
 #include "config.h"
 #include "utilities.h"
+#include "state.h"
 
 TinyGsm modem(SerialAT);
 TinyGsmClient client(modem);
@@ -26,6 +27,16 @@ void callback(char* topic, byte* payload, unsigned int length) {
       Serial.println("Reboot command received via MQTT!");
       delay(500);
       ESP.restart();
+    }
+    else if (message.equalsIgnoreCase("power_off")) {
+      Serial.println("Power off command received via MQTT!");
+      delay(500);
+      powerOffRequested = true;
+    }
+    else if (message.equalsIgnoreCase("stop_alarm")) {
+      Serial.println("Stop alarm command received via MQTT!");
+      delay(500);
+      stopAlarmRequested = true;
     }
   }
 }
@@ -53,14 +64,14 @@ void connectToMQTT() {
   }
 }
 
-void sendLocation(float lat, float lng, float alt, float speed, float accuracy) {
+void publishLocation(float lat, float lng, float alt, float speed, float accuracy) {
   String payload = "{\"latitude\":" + String(lat, 6) + ",\"longitude\":" + String(lng, 6) + ",\"altitude\":" + 
     String(alt, 2) + ",\"speed\":" + String(speed, 2) + ",\"gps_accuracy\":" + String(accuracy, 2) + "}";
   mqttClient.publish(MQTT_TOPIC_LOC, payload.c_str());
   Serial.println("📡 Sent: " + payload);
 }
 
-void sendKeyFobStatus(bool found) {
+void publishKeyFobStatus(bool found) {
   String payload = "{\"status\":\"" + String(found ? "found" : "not_found") + "\"}";
   mqttClient.publish(MQTT_TOPIC_KEYFOB, payload.c_str());
   if (found) {
@@ -71,7 +82,7 @@ void sendKeyFobStatus(bool found) {
   // Serial.println("🔵 BLE key fob: " + String(found ? "found" : "not_found"));
 }
 
-void sendBatteryStatus() {
+void publishBatteryStatus() {
   float voltage = ReadBatteryVoltage();
   int percent = BatteryPercent(voltage);
 
@@ -87,7 +98,7 @@ void sendBatteryStatus() {
 // σύνδεση (μέσω modem/AT) η μεταφορά του πακέτου έχει μεγαλύτερο latency απ' ό,τι
 // σε WiFi - χωρίς αυτό, το sleepNow() προχωρούσε αμέσως σε gprsDisconnect() πριν
 // προλάβει να ολοκληρωθεί πραγματικά η αποστολή του "sleeping" μηνύματος.
-void sendDeviceStatus(bool sleeping) {
+void publishDeviceStatus(bool sleeping) {
   String payload = "{\"sleeping\": " + String(sleeping ? "true" : "false") + "}";
   bool ok = mqttClient.publish(MQTT_TOPIC_STATUS, payload.c_str(), true); // retained
   if (ok) {
@@ -102,7 +113,7 @@ void sendDeviceStatus(bool sleeping) {
   mqttClient.loop();
 }
 
-void sendModemStatus() {
+void publishModemStatus() {
   String modemInfo = modem.getModemInfo();
   String signalQuality = String(modem.getSignalQuality());
 
@@ -110,6 +121,19 @@ void sendModemStatus() {
   mqttClient.publish(MQTT_TOPIC_MODEM, payload.c_str());
   Serial.println("Modem Info: " + modemInfo);    
   Serial.println("Signal Quality: " + signalQuality);    
+}
+
+void publishAlarmEvent() {
+  String payload = "{\"event\":\"ALARM_TRIGGERED\",\"uptime_ms\":" + String(millis()) + "}";
+  mqttClient.publish(MQTT_TOPIC_ALARM, payload.c_str(), false); // ΟΧΙ retained -- άμεση, one-shot ειδοποίηση
+  mqttClient.loop();
+  Serial.println("🚨 Alarm event δημοσιεύτηκε: " + String(MQTT_TOPIC_ALARM));
+}
+ 
+void publishStateTopic() {
+  mqttClient.publish(MQTT_TOPIC_STATE, stateNameOf(rtcDeviceState), true); // retained
+  mqttClient.loop();
+  Serial.println("State topic ενημερώθηκε: " + String(MQTT_TOPIC_STATE) + " = " + String(stateNameOf(rtcDeviceState)));
 }
 
 // Read battery voltage

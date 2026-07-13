@@ -1,7 +1,12 @@
-// utilities.h – Custom definitions for TTGO T-SIM7000G
-
 #pragma once
 #include <Arduino.h>
+
+// -----------------------------------------
+#define TINY_GSM_MODEM_SIM7000
+
+// -----------------------------------------
+
+#ifdef TINY_GSM_MODEM_SIM7000
 
 // --- Board identification ---
 #define PRODUCT_MODEL_NAME "LilyGo T-SIM7000G"
@@ -34,10 +39,8 @@ extern PubSubClient mqttClient;
 #define LED_ON           LOW
 
 // --- Motion sensor pin (Wake pin) ---
-#define MOTION_INT_PIN   33   // συνδέεις το INT από MPU6050 ή ADXL345 εδώ
-// #define MPU6050_INT_PIN  33 
-
-#define SW420_PIN  32   // συνδέεις το OUT από SW-420 εδώ (αν χρησιμοποιήσεις SW-420 αντί για MPU6050)
+#define MOTION_INT_PIN   33   // INT pin from MPU6050 / ADXL345
+#define SW420_PIN  32   // OUT pin from SW-420 (if using SW-420 instead of MPU6050)
 
 // --- SD card SPI ---
 #define BOARD_MISO_PIN   2
@@ -51,6 +54,8 @@ extern PubSubClient mqttClient;
 #define ADC_ATTEN ADC_11db  // ADC attenuation
 #define VOLTAGE_DIVIDER 2.0 // Divider R1=R2=100k
 #define ADC_RES 12          // ADC resolution
+
+#endif // TINY_GSM_MODEM_SIM7000
 
 // --- SIGNAL STRENGTH ---
 #define BLE_EXCELLENT_SIGNAL -50    // Very close

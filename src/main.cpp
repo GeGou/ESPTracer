@@ -4,6 +4,7 @@
 #include "modemManager.h"
 #include "mqttManager.h"
 #include <BLEDevice.h>
+#include "state.h"
 // #include <WiFi.h>
 // #include <WiFiClient.h>
 
@@ -22,8 +23,14 @@
 
 // === FUNCTIONS ===
 void sleepNow();
+void sleepSilent();
 void scanForKeyFob();
 void IRAM_ATTR onMotionISR();
+void disarmedFlow();
+void startAlarmTracking();
+// void publishAlarmEvent();
+// void publishStateTopic();
+void fullPowerOff();
 
 #ifdef USE_MPU6050
 void writeMPU(uint8_t reg, uint8_t data); // MPU6050-specific (I2C)
@@ -46,20 +53,41 @@ void setupSW420MotionInterrupt();          // καθαρά digital, no I2C
   #error "You must enable at least one of the USE_SW420 / USE_MPU6050"
 #endif
 
+
+// ==================================================================
+// STATE MACHINE (Monimoto-style): DISARMED / ARMED / ALARM
+//   DISARMED : keyfob βρέθηκε -> μία αναφορά θέσης, sleep. Καμία ειδοποίηση.
+//   ARMED    : keyfob ΔΕΝ βρέθηκε, ΠΡΩΤΗ φορά -> silent arming, ΚΑΝΕΝΑ modem,
+//              πάει κατευθείαν για ύπνο, οπλισμένο.
+//   ALARM    : ήδη ήταν ARMED και ξανάρθε motion event -> escalation, πλήρες
+//              tracking + άμεση ειδοποίηση.
+// Το rtcDeviceState επιβιώνει το deep sleep μέσω RTC memory (RTC_DATA_ATTR).
+// ==================================================================
+// enum DeviceState { 
+//   STATE_DISARMED = 0,
+//   STATE_ARMED = 1,
+//   STATE_ALARM = 2 
+// };
+
+RTC_DATA_ATTR int rtcDeviceState = STATE_DISARMED;
+ 
+const char* stateNameOf(int s) {
+  switch (s) {
+    case STATE_DISARMED: return "DISARMED";
+    case STATE_ARMED:    return "ARMED";
+    case STATE_ALARM:    return "ALARM";
+    default:             return "UNKNOWN";
+  }
+}
+
 // ==== BLE Key Fob ====
 BLEScan* pBLEScan;
 bool keyFobFound = false;
 
 // ==== Tracking ====
-unsigned long sendInterval = 15000; // κάθε 15s (GPS/MQTT tracking) - μόνο σε FULL mode
 unsigned long lastSend = 0;
-
-unsigned long bleRescanInterval = 30000; // κάθε 30s επανέλεγχος BLE key fob όσο είμαστε ξύπνιοι (FULL mode)
 unsigned long lastBleScan = 0;
-
 unsigned long lastMotion = 0;
-
-const unsigned long motionTimeout = 1UL * 60UL * 1000UL; // 1 λεπτό σε ms
 
 // ==== Motion detection ====
 // Το ISR δεν κάνει I2C calls (ασφαλές μέσα σε interrupt context).
@@ -75,17 +103,14 @@ void IRAM_ATTR onMotionISR() {
   }
 }
 
-// ==================================================================
-// Software "consensus" φίλτρο κίνησης — μειώνει false timer resets από
-// μεμονωμένους κραδασμούς, χωρίς να αγγίζουμε το (ήδη πολύ ευαίσθητο)
-// ποτενσιόμετρο του SW-420. Μόνο αν συμβούν αρκετά motion events μέσα
-// σε ένα μικρό χρονικό παράθυρο θεωρούμε πραγματική, συνεχιζόμενη κίνηση
-// (π.χ. οδήγηση) και κάνουμε reset το inactivity timer.
-// ==================================================================
-const unsigned long MOTION_WINDOW_MS = 5000;  // παράθυρο ανάλυσης (5s)
-const int MOTION_CONSENSUS_COUNT = 3;         // ελάχιστα events μέσα στο παράθυρο
+// Software consensus φίλτρο κίνησης (μόνο για ΟΣΟ διαρκεί το ALARM tracking loop)
 unsigned long motionWindowStart = 0;
 int motionEventsInWindow = 0;
+
+// MQTT commands (μέσω MQTT_TOPIC_COMMAND) -- λειτουργούν ΜΟΝΟ όσο η
+// συσκευή είναι ήδη ξύπνια/συνδεδεμένη (δηλαδή κατά τη διάρκεια ALARM).
+volatile bool stopAlarmRequested = false;
+volatile bool powerOffRequested = false;
 
 #ifdef USE_MPU6050
 //////////////////////////////////////
@@ -139,9 +164,9 @@ void setupMPUMotionInterrupt() {
 #ifdef USE_SW420
 // ==================================================================
 // SW-420 setup.
-// ΕΠΙΒΕΒΑΙΩΜΕΝΗ πολικότητα στο δικό σου module (μέσω sw420_test.cpp):
-//   idle  = LOW
-//   pulse = HIGH (πολύ σύντομο, μερικά ms, σε κάθε δόνηση/χτύπημα)
+// ΕΠΙΒΕΒΑΙΩΣΗ πολικότητας στο module μέσω sw420_test.cpp:
+// π.χ  idle  = LOW
+//      pulse = HIGH (πολύ σύντομο, μερικά ms, σε κάθε δόνηση/χτύπημα)
 // Άρα: RISING edge για το interrupt, και ext0 wake on HIGH (1).
 // Η ευαισθησία ρυθμίζεται ΜΟΝΟ με το ποτενσιόμετρο πάνω στο module.
 // ==================================================================
@@ -165,9 +190,139 @@ void scanForKeyFob() {
     }
   }
   pBLEScan->clearResults(); // απελευθέρωση μνήμης μετά από κάθε scan
-
-  sendKeyFobStatus(keyFobFound);
+  publishKeyFobStatus(keyFobFound);
 }
+ 
+// ==================================================================
+// Κοινό "άναμμα" modem/GPRS/GPS/MQTT -- χρησιμοποιείται και από DISARMED
+// (μία αναφορά) και από ALARM (πλήρες tracking).
+// ==================================================================
+static void powerUpConnectivity() {
+  // Pull down DTR to ensure the modem is not in sleep state
+  pinMode(MODEM_DTR_PIN, OUTPUT);
+  digitalWrite(MODEM_DTR_PIN, LOW);
+ 
+  // Power ON sequence for SIM7000
+  modemPowerOn();
+  delay(5000);
+ 
+  Serial.println("Check modem online.");
+  int attempts = 0;
+  bool modemOK = modem.testAT();
+  while (!modemOK) {
+    Serial.print(".");
+    delay(500);
+    attempts++;
+ 
+    if (attempts % 10 == 0) {
+      Serial.println("\nModem is not responding, trying modem restart!");
+      modem.restart();
+      delay(3000);  // Wait for modem to restart
+    }
+ 
+    if (attempts > 20) {
+      Serial.println("Modem still not responding after restart, restarting ESP32!");
+      ESP.restart();
+    }
+ 
+    modemOK = modem.testAT();
+  }
+  Serial.println("Modem is online!");
+ 
+  // Set LED OFF
+  pinMode(BOARD_LED_PIN, OUTPUT);
+  digitalWrite(BOARD_LED_PIN, HIGH);
+ 
+  // Unlock your SIM card with a PIN if needed
+  if (GSM_PIN && modem.getSimStatus() != 3) {
+    modem.simUnlock(GSM_PIN);
+  }
+ 
+  delay(500);
+ 
+  // Connect to network
+  Serial.print("Trying to connect to APN: ");
+  Serial.println(APN);
+  while (!modem.gprsConnect(APN, GPRS_USER, GPRS_PASS)) {
+    Serial.println("GPRS connect failed, retrying...");
+    Serial.println("signal quality: " + String(modem.getSignalQuality()));
+    checkModemStatus();
+    delay(4000);
+  }
+ 
+  // Check GPRS connectio
+  if (modem.isGprsConnected()) {
+    Serial.println("GPRS connected");
+    Serial.print("Local IP: ");
+    Serial.println(modem.getLocalIP());
+  } else {
+    Serial.println("GPRS not connected");
+  }
+ 
+  // Enable GPS
+  GPSTurnOn();
+  delay(500);
+ 
+  // Connect MQTT
+  connectToMQTT();
+  delay(500);
+
+  // NEW: εγγραφή για λήψη εντολών (STOP_ALARM / POWER_OFF) -- δουλεύει μόνο
+  // όσο η συσκευή παραμένει ξύπνια/συνδεδεμένη (δηλαδή κατά τη διάρκεια ALARM).
+  mqttClient.setCallback(callback);
+  mqttClient.subscribe(MQTT_TOPIC_COMMAND);
+}
+ 
+// ==================================================================
+// DISARMED flow: μία αναφορά θέσης πριν sleep. Καμία επαναλαμβανόμενη
+// αποστολή, δεν μπαίνει στο loop().
+// ==================================================================
+void disarmedFlow() {
+  powerUpConnectivity();
+ 
+  publishDeviceStatus(false);
+  publishBatteryStatus();
+  delay(500);
+  publishModemStatus();
+  delay(500);
+ 
+  publishStateTopic(); // ενημερώνει αν μόλις επέστρεψε από ARMED/ALARM
+ 
+  float lat = 0, lon = 0, speed = 0, alt = 0, accuracy = 0;
+  int   vsat = 0, usat = 0, year = 0, month = 0, day = 0, hour = 0, min = 0, sec = 0;
+ 
+  Serial.println("DISARMED: requesting one-shot location before sleep...");
+  if (modem.getGPS(&lat, &lon, &speed, &alt, &vsat,
+    &usat, &accuracy, &year, &month, &day, &hour, &min, &sec)) {
+    publishLocation(lat, lon, alt, speed, accuracy);
+  } else {
+    Serial.println("DISARMED: δεν βρέθηκε GPS fix, sleep χωρίς θέση.");
+  }
+  delay(500);
+ 
+  sleepNow();
+}
+ 
+// ==================================================================
+// ALARM tracking: πλήρες άναμμα + ΑΜΕΣΗ ειδοποίηση πριν καν περιμένουμε
+// GPS fix, μετά συνεχίζει σαν το παλιό FULL mode μέσα στο loop().
+// ==================================================================
+void startAlarmTracking() {
+  powerUpConnectivity();
+ 
+  publishStateTopic();
+  publishAlarmEvent(); // ΠΡΩΤΑ η ειδοποίηση, πριν περιμένουμε GPS fix
+ 
+  publishDeviceStatus(false);
+  publishBatteryStatus();
+  delay(500);
+  publishModemStatus();
+  delay(500);
+ 
+  lastSend = 0; // ώστε το loop() να στείλει GPS fix αμέσως στον πρώτο κύκλο
+}
+/////////////////////////////////////////////////////
+
 
 void setup() {
   Serial.begin(115200);
@@ -186,8 +341,10 @@ void setup() {
   esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
   Serial.printf("Wakeup cause: %d\n", cause);
 
-  if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_EXT0) {
+  bool normalBoot = false;
+  if (cause != ESP_SLEEP_WAKEUP_EXT0) {
     Serial.println("Normal boot");
+    normalBoot = true;
   } else {
     Serial.println("Wakeup from EXT0 (motion)");
   }
@@ -209,144 +366,86 @@ void setup() {
 
   scanForKeyFob();
   lastBleScan = millis();
+  bool keyfobPresent = keyFobFound;
+  bool effectiveArmed = !keyfobPresent;
 
-  // Αν βρέθηκε το keyfob, θέλουμε "light" mode: μία αναφορά θέσης πριν τον ύπνο, όχι συνεχές tracking.
-  bool lightMode = keyFobFound;
-  if (lightMode) {
-    Serial.println("Keyfob found -> LIGHT mode (one location report before sleep).");
+  DeviceState newState;
+  if (!effectiveArmed) {
+    newState = STATE_DISARMED;
+  } else if (normalBoot) {
+    // Πρώτη εκκίνηση/reset ενώ armed -> ξεκινάμε καθαρά από ARMED, ποτέ ALARM.
+    newState = STATE_ARMED;
+  } else if (rtcDeviceState == STATE_ARMED || rtcDeviceState == STATE_ALARM) {
+    // Ήδη armed από πριν, ΝΕΟ motion event -> escalation σε ALARM
+    // (2ο+ διαδοχικό motion event ενώ armed = πραγματική κίνηση, όχι απλά
+    // ο ιδιοκτήτης που απομακρύνεται μία φορά).
+    newState = STATE_ALARM;
   } else {
-    Serial.println("Keyfob not found -> FULL tracking mode.");
+    // Πρώτη φορά armed (μόλις έφυγε το keyfob) -> silent arming.
+    newState = STATE_ARMED;
   }
 
-  // Pull down DTR to ensure the modem is not in sleep state
-  pinMode(MODEM_DTR_PIN, OUTPUT);
-  digitalWrite(MODEM_DTR_PIN, LOW);
-
-  // Power ON sequence for SIM7000
-  modemPowerOn();
-  delay(5000); // Wait for modem to start
-
-  Serial.println("Check modem online.");
-  int attempts = 0;
-  bool modemOK = modem.testAT();
-  while (!modemOK) {
-    Serial.print(".");
-    delay(500);
-    attempts++;
-
-    if (attempts % 10 == 0) {
-      Serial.println("\nModem is not responding, trying modem restart!");
-      modem.restart();
-      delay(3000); // Wait for modem to restart
-    }
-
-    if (attempts > 20) {
-      Serial.println("Modem still not responding after restart, restarting ESP32!");
-      ESP.restart();
-    }
-
-    modemOK = modem.testAT();
-  }
-  Serial.println("Modem is online!");
-
-  // Set LED OFF
-  pinMode(BOARD_LED_PIN, OUTPUT);
-  digitalWrite(BOARD_LED_PIN, HIGH);
-
-  // Unlock your SIM card with a PIN if needed
-  if (GSM_PIN && modem.getSimStatus() != 3) {
-    modem.simUnlock(GSM_PIN);
-  }
-
-  delay(500);
-
-  // Connect to network
-  Serial.print("Trying to connect to APN: ");
-  Serial.println(APN);
-  while (!modem.gprsConnect(APN, GPRS_USER, GPRS_PASS)) {
-    Serial.println("GPRS connect failed, retrying...");
-    Serial.println("signal quality: " + String(modem.getSignalQuality()));
-    checkModemStatus();
-    delay(4000);
-  }
-
-  // Check GPRS connection
-  if (modem.isGprsConnected()) {
-    Serial.println("GPRS connected");
-    Serial.print("Local IP: ");
-    Serial.println(modem.getLocalIP());
-  } else {
-    Serial.println("GPRS not connected");
-  }
-
-  // Enable GPS
-  GPSTurnOn();
-  delay(500); // Wait for GPS to stabilize
-
-  // Connect MQTT
-  connectToMQTT();
-  delay(500);
-
-  sendDeviceStatus(false); // sleeping = false
-
-  sendBatteryStatus();
-  delay(500);
-
-  sendModemStatus();
-  delay(500);
+  Serial.println("State: " + String(stateNameOf(rtcDeviceState)) + " -> " + String(stateNameOf(newState)));
+  rtcDeviceState = newState;
 
   lastMotion = millis();
   motionWindowStart = millis();
   motionEventsInWindow = 0;
 
-  // ==================================================================
-  // LIGHT MODE: keyfob βρέθηκε -> μία αναφορά θέσης, μετά κατευθείαν sleep.
-  // Δεν μπαίνουμε καθόλου στο loop() σε αυτή την περίπτωση.
-  //
-  // TRADE-OFF: αν το keyfob παραμένει «βρεθέν» καθ' όλη τη διάρκεια της
-  // διαδρομής, το SW-420 θα ξυπνάει τη συσκευή σε κάθε κραδασμό/κίνηση,
-  // και ΚΑΘΕ wake θα κάνει πλήρη κύκλο modem-on / GPS-fix / MQTT-send πριν
-  // ξανακοιμηθεί. Αυτό μπορεί να καταναλώνει ΠΕΡΙΣΣΟΤΕΡΗ μπαταρία από το
-  // συνεχές FULL tracking, γιατί το "άναμμα" του modem/GPRS κοστίζει πολύ.
-  // Αν το δεις να αδειάζει γρήγορα η μπαταρία σε πραγματικό ταξίδι, πες μου
-  // να προσθέσουμε ένα cooldown (π.χ. min 5-10 λεπτά ανάμεσα σε reports).
-  // ==================================================================
-  if (lightMode) {
-    float lat = 0, lon = 0, speed = 0, alt = 0, accuracy = 0;
-    int   vsat = 0, usat = 0, year = 0, month = 0, day = 0, hour = 0, min = 0, sec = 0;
-
-    Serial.println("LIGHT mode: requesting one-shot location before sleep...");
-    if (modem.getGPS(&lat, &lon, &speed, &alt, &vsat,
-      &usat, &accuracy, &year, &month, &day, &hour, &min, &sec)) {
-      sendLocation(lat, lon, alt, speed, accuracy);
-    } else {
-      Serial.println("LIGHT mode: no GPS fix found, sleeping without location.");
-    }
-    delay(500);
-
-    sleepNow(); // deep sleep — δεν επιστρέφει, το loop() δεν τρέχει καθόλου σε αυτόν τον κύκλο
-    return;     // φρουρός, ποτέ δεν φτάνει εδώ στην πράξη
+  if (newState == STATE_DISARMED) {
+    disarmedFlow();
+    return; // δεν φτάνει ποτέ εδώ -- disarmedFlow() κάνει sleepNow()
   }
+ 
+  if (newState == STATE_ARMED) {
+    Serial.println("ARMED (silent) -- κανένα modem, ξανά για ύπνο.");
+    sleepSilent();
+    return; // δεν φτάνει ποτέ εδώ
+  }
+ 
+  // STATE_ALARM
+  startAlarmTracking(); // επιστρέφει κανονικά, το loop() αναλαμβάνει το tracking
 
-  // FULL mode: συνεχίζουμε κανονικά, το loop() θα αναλάβει το tracking
 }
 
 void loop() {
   unsigned long now = millis();
+  
+  mqttClient.loop(); // ΠΡΕΠΕΙ να τρέχει ώστε να φτάνουν οι εντολές στο callback()
 
+  // Έλεγχος για εντολές που ήρθαν μέσω MQTT_TOPIC_COMMAND
+  if (powerOffRequested) {
+    Serial.println("Εντολή POWER_OFF ελήφθη -- πλήρης, μόνιμη απενεργοποίηση.");
+    fullPowerOff();
+    return; // δεν φτάνει ποτέ εδώ
+  }
+ 
+  if (stopAlarmRequested) {
+    Serial.println("Εντολή STOP_ALARM ελήφθη -- σταματάει το τρέχον alarm.");
+    stopAlarmRequested = false;
+    rtcDeviceState = STATE_ARMED; // παραμένει "άγρυπνο", θα ξανασκάσει σε νέα κίνηση
+    publishStateTopic();
+    sleepNow();
+    return; // δεν φτάνει ποτέ εδώ
+  }
+
+  // Αυτό το loop() τρέχει ΜΟΝΟ όσο rtcDeviceState == STATE_ALARM.
   // Update last motion time if motion detected — με software consensus φίλτρο
   if (motionFlag) {
     motionFlag = false;
 #ifdef USE_MPU6050
     readMPU(0x3A); // INT_STATUS: clear-on-read -- MPU6050-specific
 #endif
-    // SW-420 NOTE: δεν χρειάζεται κανένα clear-on-read - το DO pin δεν κάνει latch.
+    // FIX: sliding λογική -- μηδενισμός ΜΟΝΟ αν υπάρξει πραγματικό κενό (>MOTION_WINDOW_MS)
+    // από το ΠΡΟΗΓΟΥΜΕΝΟ event, όχι από την αρχή ενός σταθερού παραθύρου. Έτσι, συνεχόμενα
+    // events (π.χ. 1/sec λόγω hardware debounce) δεν "χάνουν" ποτέ το count λόγω απόλυτου
+    // χρόνου -- μόνο μια πραγματική παύση στην κίνηση κάνει reset.    
     if (now - motionWindowStart > MOTION_WINDOW_MS) {
-      motionWindowStart = now;
       motionEventsInWindow = 1;
     } else {
       motionEventsInWindow++;
     }
+    motionWindowStart = now;  // ενημέρωση σε ΚΑΘΕ event, όχι μόνο στο reset
 
     if (motionEventsInWindow >= MOTION_CONSENSUS_COUNT) {
       lastMotion = now; // "πραγματική" συνεχιζόμενη κίνηση επιβεβαιωμένη
@@ -358,16 +457,23 @@ void loop() {
   }
 
   // === BLE rescan - περιοδικός επανέλεγχος όσο παραμένουμε ξύπνιοι ===
-  if (now - lastBleScan >= bleRescanInterval) {
+  if (now - lastBleScan >= BLE_RESCAN_INTERVAL_MS) {
     lastBleScan = now;
     Serial.println("Re-scanning for key fob...");
     scanForKeyFob();
     // Σημείωση: εδώ θα μπορούσαμε στο μέλλον να μεταβούμε από FULL σε LIGHT
     // αν το keyfob ξαναβρεθεί μέσα σε ένα FULL tracking session.
+    if (keyFobFound) {
+      Serial.println("🔑 Keyfob επέστρεψε κατά τη διάρκεια ALARM -> DISARMED, τερματισμός.");
+      rtcDeviceState = STATE_DISARMED;
+      publishStateTopic();
+      sleepNow();
+      return;
+    }
   }
 
   // === GPS === (μόνο σε FULL mode, αφού το loop() τρέχει μόνο τότε)
-  if (now - lastSend >= sendInterval) {
+  if (now - lastSend >= ALARM_SEND_INTERVAL_MS) {
     lastSend = now;
 
     float lat = 0, lon = 0, speed = 0, alt = 0, accuracy = 0;
@@ -376,26 +482,30 @@ void loop() {
     Serial.println("Requesting current location");
     if (modem.getGPS(&lat, &lon, &speed, &alt, &vsat,
       &usat, &accuracy, &year, &month, &day, &hour, &min, &sec)) {
-      sendLocation(lat, lon, alt, speed, accuracy);
+      publishLocation(lat, lon, alt, speed, accuracy);
     } else {
-      Serial.println("Couldn't get GPS/GNSS/GLONASS location, retrying in " + String(sendInterval / 1000) + "s.");
+      Serial.println("Couldn't get GPS/GNSS/GLONASS location, retrying in " + String(ALARM_SEND_INTERVAL_MS / 1000) + "s.");
     }
   }
 
   // === Check inactivity ===
-  if (now - lastMotion > motionTimeout) {
-    Serial.println("Stop - No motion for " + String(motionTimeout / 1000) + " seconds.");
+  if (now - lastMotion > MOTION_TIMEOUT_MS) {
+    Serial.println("Stop - No motion for " + String(MOTION_TIMEOUT_MS / 1000) + " seconds.");
+    // Παραμένει "προετοιμασμένο": αν ξαναρθεί motion αμέσως, θα πάει κατευθείαν
+    // σε ALARM (χωρίς νέο silent-arm κύκλο), αφού rtcDeviceState μένει ARMED.
+    rtcDeviceState = STATE_ARMED;
+    publishStateTopic();
     sleepNow();
   }
 
-  mqttClient.loop();
+  // mqttClient.loop();
 }
 
 void sleepNow() {
   detachInterrupt(digitalPinToInterrupt(WAKE_PIN));
 
-  sendDeviceStatus(true); // sleeping = true
-  sendBatteryStatus();
+  publishDeviceStatus(true); // sleeping = true
+  publishBatteryStatus();
 
   modem.gprsDisconnect();
   GPSTurnOff();
@@ -459,6 +569,65 @@ void sleepNow() {
   SerialAT.end();
   btStop(); // Stop Bluetooth to save power
   delay(200);
+  esp_deep_sleep_start();
+  Serial.println("This will never be printed");
+}
+
+// ==================================================================
+// fullPowerOff(): ΠΛΗΡΗΣ, ΜΟΝΙΜΗ απενεργοποίηση -- deep sleep ΧΩΡΙΣ κανένα
+// wake source ενεργό (ούτε ext0/motion, ούτε timer). Η συσκευή ΔΕΝ θα
+// ξυπνήσει ποτέ μόνη της ξανά -- χρειάζεται φυσικό reset ή power-cycle
+// (π.χ. αποσύνδεση μπαταρίας, κουμπί RESET, ή EN pin) για να ξαναλειτουργήσει.
+// Χρήσιμο για πλήρη απενεργοποίηση (π.χ. πούλησες το όχημα, service κλπ.).
+// ==================================================================
+void fullPowerOff() {
+  detachInterrupt(digitalPinToInterrupt(WAKE_PIN));
+ 
+  publishDeviceStatus(true);
+  modem.gprsDisconnect();
+  GPSTurnOff();
+ 
+  Serial.println("Πλήρης απενεργοποίηση modem...");
+  modem.poweroff();
+  delay(1000);
+ 
+  // ΚΑΝΕΝΑ wake source -- ούτε ext0, ούτε timer. Μόνιμος ύπνος.
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+ 
+  SerialAT.end();
+  btStop();
+  Serial.println("Η συσκευή απενεργοποιείται ΜΟΝΙΜΑ. Χρειάζεται φυσικό reset/power-cycle για επανεκκίνηση.");
+  delay(200);
+  esp_deep_sleep_start();
+}
+
+// ==================================================================
+// sleepSilent(): ελαφρύ sleep για STATE_ARMED (χωρίς ειδοποίηση) --
+// ΔΕΝ αγγίζει το modem, γιατί ποτέ δεν ενεργοποιήθηκε σε αυτόν τον κύκλο.
+// ==================================================================
+void sleepSilent() {
+  detachInterrupt(digitalPinToInterrupt(WAKE_PIN));
+ 
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+ 
+#ifdef USE_MPU6050
+  readMPU(0x3A);
+  delay(50);
+ 
+  int clearAttempts = 0;
+  while (digitalRead(WAKE_PIN) == HIGH && clearAttempts < 5) {
+    readMPU(0x3A);
+    delay(50);
+    clearAttempts++;
+  }
+#endif
+ 
+  gpio_num_t motionPin = static_cast<gpio_num_t>(WAKE_PIN);
+  esp_sleep_enable_ext0_wakeup(motionPin, 1);
+ 
+  SerialAT.end(); // ασφαλές ακόμα κι αν δεν ξεκίνησε ποτέ επικοινωνία
+  btStop();
+  delay(100);
   esp_deep_sleep_start();
   Serial.println("This will never be printed");
 }

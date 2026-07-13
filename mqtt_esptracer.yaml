@@ -146,3 +146,25 @@ button:
       name: "ESPTracer"
       manufacturer: "Custom"
       model: "LiLyGO T-SIM7000G"
+
+  - name: "Power Off"
+    unique_id: esptracer_power_off_button
+    command_topic: "esptracer/command"
+    payload_press: "power_off"
+    icon: mdi:power
+    device:
+      identifiers: ["esptracer_device"]
+      name: "ESPTracer"
+      manufacturer: "Custom"
+      model: "LiLyGO T-SIM7000G"
+
+  - name: "Stop Alarm"
+    unique_id: esptracer_stop_alarm_button
+    command_topic: "esptracer/command"
+    payload_press: "stop_alarm"
+    icon: mdi:alarm
+    device:
+      identifiers: ["esptracer_device"]
+      name: "ESPTracer"
+      manufacturer: "Custom"
+      model: "LiLyGO T-SIM7000G"
