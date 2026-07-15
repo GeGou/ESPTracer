@@ -37,7 +37,8 @@ void setup() {
 
   // Δοκιμάζουμε ΧΩΡΙΣ pull-up πρώτα, μόνο διάβασμα raw τιμής,
   // ώστε να δούμε το πραγματικό idle state του module.
-  pinMode(SW420_PIN, INPUT);
+  // pinMode(SW420_PIN, INPUT);
+  pinMode(SW420_PIN, INPUT_PULLUP); // αν το module σου έχει ενσωματωμένο pull-up/pull-down, δοκίμασε και αυτό
 
   int initial = digitalRead(SW420_PIN);
   Serial.print("Αρχική (idle) κατάσταση pin: ");

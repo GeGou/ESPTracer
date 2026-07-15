@@ -14,8 +14,8 @@
 #define MQTT_TOPIC_BAT "esptracer/battery"
 #define MQTT_TOPIC_MODEM "esptracer/modem"
 #define MQTT_TOPIC_COMMAND "esptracer/command"
-#define MQTT_TOPIC_ALARM "esptracer/alarm" // one-shot, όχι retained -- άμεση ειδοποίηση
-#define MQTT_TOPIC_STATE "esptracer/state" // retained -- τρέχουσα κατάσταση (DISARMED/ARMED/ALARM)
+#define MQTT_TOPIC_ALARM "esptracer/alarm" // one-shot, not retained -- immediate notification of ALARM event
+#define MQTT_TOPIC_STATE "esptracer/state" // retained -- current state (DISARMED/ARMED/ALARM)
 
 
 // GPRS Settings
@@ -27,8 +27,8 @@
 #define KEYFOB_MAC_ADDRESS "ff:ff:ff:ff:ff:ff" // iTag's MAC address, replace with your iTag's actual MAC address
 
 // state machine thresholds
-#define MOTION_TIMEOUT_MS (1UL * 60UL * 1000UL) // 1 λεπτό αδράνειας -> τέλος ALARM tracking
-#define ALARM_SEND_INTERVAL_MS 5000    // GPS/MQTT interval ΚΑΤΑ ΤΗ ΔΙΑΡΚΕΙΑ ALARM
-#define BLE_RESCAN_INTERVAL_MS 30000    // επανέλεγχος keyfob κατά τη διάρκεια ALARM
-#define MOTION_WINDOW_MS 5000     // παράθυρο consensus φίλτρου κίνησης
-#define MOTION_CONSENSUS_COUNT 3    // ελάχιστα events μέσα στο παράθυρο
+#define MOTION_TIMEOUT_MS (2UL * 60UL * 1000UL) // 2 minutes of inactivity -> end of ALARM tracking 
+#define ALARM_SEND_INTERVAL_MS 5000    // GPS/MQTT interval DURING ALARM
+#define BLE_RESCAN_INTERVAL_MS 30000    // rescan keyfob during ALARM
+#define MOTION_WINDOW_MS 5000     // consensus window for motion filter
+#define MOTION_CONSENSUS_COUNT 3    // minimum events within the window

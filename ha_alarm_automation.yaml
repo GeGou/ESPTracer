@@ -1,0 +1,20 @@
+# Not tested yet
+automation:
+  - alias: "ESP Tracer - Alarm Triggered"
+    trigger:
+      - platform: state
+        entity_id: sensor.esp_tracer_state
+        to: "ALARM"
+    action:
+      - service: notify.mobile_app_<your_device>  # change to your mobile app notification service
+        data:
+          title: "🚨 Possible Theft!"
+          message: "The tracker has entered ALARM state."
+          data:
+            priority: high
+            ttl: 0
+      # Optional: sound/siren notification
+      # - service: media_player.play_media
+      # - service: siren.turn_on
+      #   target:
+      #     entity_id: siren.my_siren

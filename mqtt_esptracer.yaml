@@ -84,8 +84,25 @@ sensor:
     unique_id: esptracer_signal_quality
     state_topic: "esptracer/modem"
     value_template: "{{ value_json.signalQuality }}"
-    unit_of_measurement: "dBm"
+    # unit_of_measurement: "dBm"
+    unit_of_measurement: "CSQ"
     icon: mdi:signal-cellular-3
+    device:
+      identifiers: ["esptracer_device"]
+      name: "ESPTracer"
+      manufacturer: "Custom"
+      model: "LilyGO T-SIM7000G"
+
+  # === STATE (ALARM / ARMED / DISARMED) ===
+  - name: "Device State"
+    unique_id: esptracer_state
+    state_topic: "esptracer/state"
+    icon: mdi:shield-car
+    device_class: enum
+    options:
+      - "DISARMED"
+      - "ARMED"
+      - "ALARM"
     device:
       identifiers: ["esptracer_device"]
       name: "ESPTracer"
@@ -162,7 +179,7 @@ button:
     unique_id: esptracer_stop_alarm_button
     command_topic: "esptracer/command"
     payload_press: "stop_alarm"
-    icon: mdi:alarm
+    icon: mdi:alarm-light-off-outline
     device:
       identifiers: ["esptracer_device"]
       name: "ESPTracer"

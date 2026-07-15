@@ -171,7 +171,8 @@ void setupMPUMotionInterrupt() {
 // Η ευαισθησία ρυθμίζεται ΜΟΝΟ με το ποτενσιόμετρο πάνω στο module.
 // ==================================================================
 void setupSW420MotionInterrupt() {
-  pinMode(SW420_PIN, INPUT); // #define SW420_PIN <GPIO> στο config.h
+  // pinMode(SW420_PIN, INPUT); // #define SW420_PIN <GPIO> στο config.h
+  pinMode(SW420_PIN, INPUT_PULLUP); // #define SW420_PIN <GPIO> στο config.h
 }
 #endif // USE_SW420
 
@@ -228,10 +229,6 @@ static void powerUpConnectivity() {
     modemOK = modem.testAT();
   }
   Serial.println("Modem is online!");
- 
-  // Set LED OFF
-  pinMode(BOARD_LED_PIN, OUTPUT);
-  digitalWrite(BOARD_LED_PIN, HIGH);
  
   // Unlock your SIM card with a PIN if needed
   if (GSM_PIN && modem.getSimStatus() != 3) {
@@ -327,6 +324,10 @@ void startAlarmTracking() {
 void setup() {
   Serial.begin(115200);
   Serial.println("ESPTracer starting...");
+
+  // Set LED OFF
+  pinMode(BOARD_LED_PIN, OUTPUT);
+  digitalWrite(BOARD_LED_PIN, HIGH);
 
 #ifdef USE_MPU6050
   Wire.begin(21, 22); // SDA, SCL
