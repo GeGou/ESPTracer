@@ -28,8 +28,6 @@ void scanForKeyFob();
 void IRAM_ATTR onMotionISR();
 void disarmedFlow();
 void startAlarmTracking();
-// void publishAlarmEvent();
-// void publishStateTopic();
 void fullPowerOff();
 
 #ifdef USE_MPU6050
@@ -63,11 +61,6 @@ void setupSW420MotionInterrupt();          // καθαρά digital, no I2C
 //              tracking + άμεση ειδοποίηση.
 // Το rtcDeviceState επιβιώνει το deep sleep μέσω RTC memory (RTC_DATA_ATTR).
 // ==================================================================
-// enum DeviceState { 
-//   STATE_DISARMED = 0,
-//   STATE_ARMED = 1,
-//   STATE_ALARM = 2 
-// };
 
 RTC_DATA_ATTR int rtcDeviceState = STATE_DISARMED;
  
@@ -114,7 +107,7 @@ volatile bool powerOffRequested = false;
 
 #ifdef USE_MPU6050
 //////////////////////////////////////
-// ---- MPU6050-specific I2C helpers: ΔΕΝ χρειάζονται καθόλου με τον SW-420 ----
+// ---- MPU6050-specific I2C helpers ----
 void writeMPU(uint8_t reg, uint8_t data) {
   Wire.beginTransmission(0x68);
   Wire.write(reg);
@@ -301,8 +294,7 @@ void disarmedFlow() {
 }
  
 // ==================================================================
-// ALARM tracking: πλήρες άναμμα + ΑΜΕΣΗ ειδοποίηση πριν καν περιμένουμε
-// GPS fix, μετά συνεχίζει σαν το παλιό FULL mode μέσα στο loop().
+// ALARM tracking: πλήρες άναμμα + ΑΜΕΣΗ ειδοποίηση πριν καν περιμένουμε GPS fix
 // ==================================================================
 void startAlarmTracking() {
   powerUpConnectivity();

@@ -23,7 +23,7 @@ To flash the code you can use the **Platformio** extension in **VS Code**.
 ---
 
 ## Home Assistant 
-**NOTE**: File mqtt_tracer.yaml has been created for Home Assistant using the MQTT itergration. 
+**NOTE**: File mqtt_esptracer.yaml has been created for Home Assistant using the MQTT itergration. 
 - Go to Home Assistant config folder and in configuration.yaml add the line: mqtt: !include mqtt_esptracer.yaml
 - Add the file config/mqtt_esptracer.yaml.
 - Restart Home Assistant.
@@ -36,12 +36,15 @@ To flash the code you can use the **Platformio** extension in **VS Code**.
     - sensor.esptracer_speed
     - sensor.esptracer_signal_quality
     - sensor.esptracer_modem_info
+    - sensor.esptracer_device_state
     - device_tracker.esptracer_gps_tracker
     - binary_sensor.esptracer_keyfob_connected
     - binary_sensor.esptracer_device_sleeping
-    - button.esptracer_reboot 
+    - button.esptracer_reboot
+    - button.esptracer_stop_alarm
+    - button.esptracer_power_off
 
-> **button.esptracer_reboot** only works if ESP board is awake**
+> **button.<--->**  entities only works if ESP board is awake**
 
 ---
 
@@ -51,12 +54,25 @@ To flash the code you can use the **Platformio** extension in **VS Code**.
 |------------|-------------|
 | **TTGO T-SIM7000G** | ESP32 board with integrated SIM7000G (GSM/LTE/GNSS) modem |
 | **MPU6050 sensor** | Detects movement to trigger wake-up |
+| **SW-420 Motion Sensor** | Detects motion to trigger wake-up |
 | **BLE Keyfob / Beacon** | The Bluetooth device to be detected |
 | **SIM Card** | Provides GPRS data connection |
 | **GPS Antenna** | Required for accurate location acquisition |
 | **LiPo Battery** | 3.7V rechargeable battery (connected via JST port) |
 
 ---
+
+## Antenna / Sensor EMI Considerations
+1. Maintain physical separation between the cellular antenna and the motion sensor.
+The SIM7000G's LTE/GSM antenna emits power in bursts during transmission (TX), which can induce false triggers on the SW-420's DO pin if placed too close.
+2. Use twisted-pair or shielded cable for the motion sensor's DO signal line.
+If the sensor cable needs to be lengthened to achieve sufficient separation from the antenna, avoid single unshielded wire. Twisted-pair or shielded cable significantly reduces the risk of EMI coupling into the signal line, especially over longer runs.
+3. If close proximity is unavoidable in the final enclosure/PCB layout, apply secondary mitigation:
+
+    1. Add a small decoupling capacitor (e.g., 100nF ceramic) across VCC-GND on the SW-420 module, placed close to the module itself, to filter minor power-line spikes.
+    2. Route the SW-420's ground connection carefully — avoid large ground loops near the antenna, and keep the ground path as short/direct as possible to the common ground.
+
+--
 
 ## Battery tests
 

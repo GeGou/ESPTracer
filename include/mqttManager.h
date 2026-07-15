@@ -18,4 +18,4 @@ float ReadBatteryVoltage();
 int BatteryPercent(float voltage);
 
 // Flush MQTT messages and wait for them to be sent
-void mqttFlush(uint32_t timeout_ms=500); 
+void mqttFlush(uint32_t timeout_ms=1000); 
