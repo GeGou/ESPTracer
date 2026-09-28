@@ -38,8 +38,8 @@ void checkModemStatus() {
 void GPSTurnOn(void) {
   Serial.println("Start positioning. Make sure to locate outdoors.");
   // Enable the power to GPS
-  // Το antenna power switch στο board T-SIM7000G είναι στο modem GPIO 48,
-  // βλ. datasheet: "GPS Ant Power Enable | 48 | High | AT+CGPIO=0,48,1,1".
+  // The antenna power switch on the T-SIM7000G board is on modem GPIO 48,
+  // see datasheet: "GPS Ant Power Enable | 48 | High | AT+CGPIO=0,48,1,1".
   modem.sendAT("+CGPIO=0,48,1,1");
   if (modem.waitResponse(10000L) != 1) {
     Serial.println(" CGPIO=0,48,1,1 false ");
@@ -52,8 +52,8 @@ void GPSTurnOff(void) {
   // Disable GPS
   modem.disableGPS();
   // Disable the power to GPS
-  // Το antenna power switch στο board T-SIM7000G είναι στο modem GPIO 48,
-  // βλ. datasheet: "GPS Ant Power Enable | 48 | High | AT+CGPIO=0,48,1,0".
+  // The antenna power switch on the T-SIM7000G board is on modem GPIO 48,
+  // see datasheet: "GPS Ant Power Enable | 48 | High | AT+CGPIO=0,48,1,0".
   modem.sendAT("+CGPIO=0,48,1,0");
   if (modem.waitResponse(10000L) != 1) {
     Serial.println(" CGPIO=0,48,1,0 false ");
