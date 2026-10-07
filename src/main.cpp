@@ -257,8 +257,8 @@ static void powerUpConnectivity() {
   connectToMQTT();
   delay(500);
 
-  // NEW: registration to receive commands (STOP_ALARM / POWER_OFF) -- works only
-  // as long as the device remains awake/connected (i.e., during ALARM).
+  // Registration to receive commands (REBOOT / STOP_ALARM / POWER_OFF)
+  // Works only as long as the device remains awake/connected (i.e., during ALARM).
   mqttClient.setCallback(callback);
   mqttClient.subscribe(MQTT_TOPIC_COMMAND);
 }

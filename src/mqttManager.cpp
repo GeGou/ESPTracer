@@ -27,7 +27,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   // Serial.print("]: ");
   // Serial.println(message);
 
-  // Check for reboot command
+  // Check for reboot/power off/stop alarm command
   if (String(topic) == MQTT_TOPIC_COMMAND) {
     message.trim();
     if (message.equalsIgnoreCase("reboot")) {
@@ -76,16 +76,22 @@ void publishLocation(float lat, float lng, float alt, float speed, float accurac
   }
 }
 
+// Do not need to use cellular connection to publish key fob status, because the BLE key fob is only detected when the device is awake (during ALARM).
 void publishKeyFobStatus(bool found) {
-  String payload = "{\"status\":\"" + String(found ? "found" : "not_found") + "\"}";
-  if (!mqttClient.publish(MQTT_TOPIC_KEYFOB, payload.c_str(), true)) { // retained
-    Serial.println("⚠️  Failed to publish key fob status!");
+  // String payload = "{\"status\":\"" + String(found ? "found" : "not_found") + "\"}";
+  // if (!mqttClient.publish(MQTT_TOPIC_KEYFOB, payload.c_str(), true)) { // retained
+  //   Serial.println("⚠️  Failed to publish key fob status!");
+  // } else {
+  //   if (found) {
+  //     Serial.println("🔵 BLE key fob: found");
+  //   } else {
+  //     Serial.println("🔴 BLE key fob: not found");
+  //   }
+  // }
+  if (found) {
+    Serial.println("🔵 BLE key fob: found");
   } else {
-    if (found) {
-      Serial.println("🔵 BLE key fob: found");
-    } else {
-      Serial.println("🔴 BLE key fob: not found");
-    }
+    Serial.println("🔴 BLE key fob: not found");
   }
 }
 
