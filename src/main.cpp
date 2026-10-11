@@ -169,6 +169,7 @@ void setupSW420MotionInterrupt() {
 }
 #endif // USE_SW420
 
+// It may need some fixes
 void scanForKeyFob() {
   keyFobFound = false;
 
@@ -181,10 +182,16 @@ void scanForKeyFob() {
       if (device.getRSSI() > BLE_RSSI) {
         keyFobFound = true;
       }
+      break; // No need to continue scanning if we found the key fob
     }
   }
   pBLEScan->clearResults(); // clear memory after each scan
-  publishKeyFobStatus(keyFobFound);
+
+  if (keyFobFound) {
+    Serial.println("🔵 BLE key fob: found");
+  } else {
+    Serial.println("🔴 BLE key fob: not found");
+  }
 }
  
 // ==================================================================

@@ -4,7 +4,6 @@
 void callback(char* topic, byte* payload, unsigned int length);
 void connectToMQTT();
 void publishLocation(float lat, float lng, float alt=0, float speed=0, float accuracy=0);
-void publishKeyFobStatus(bool found);
 void publishBatteryStatus();
 void publishModemStatus();
 void publishDeviceStatus(bool sleeping);

@@ -68,18 +68,6 @@ sensor:
       model: "LiLyGO T-SIM7000G"
 
   # === MODEM INFORMATIONS ===
-  - name: "Modem Info"
-    unique_id: esptracer_modem_info
-    state_topic: "esptracer/modem"
-    value_template: "{{ value_json.modemInfo }}"
-    icon: mdi:cellphone-wireless
-    json_attributes_topic: "esptracer/modem"
-    device:
-      identifiers: ["esptracer_device"]
-      name: "ESPTracer"
-      manufacturer: "Custom"
-      model: "LilyGO T-SIM7000G"
-
   - name: "Signal Quality"
     unique_id: esptracer_signal_quality
     state_topic: "esptracer/modem"
@@ -97,6 +85,7 @@ sensor:
   - name: "Device State"
     unique_id: esptracer_state
     state_topic: "esptracer/state"
+    value_template: "{{ value | upper }}"
     icon: mdi:shield-car
     device_class: enum
     options:
@@ -109,23 +98,8 @@ sensor:
       manufacturer: "Custom"
       model: "LilyGO T-SIM7000G"
 
-# === BLE KEYFOB PRESENCE ===
+# === DEVICE SLEEP / AWAKE STATUS ===
 binary_sensor:
-  - name: "Keyfob Connected"
-    unique_id: esptracer_keyfob
-    state_topic: "esptracer/keyfob"
-    value_template: "{{ value_json.status }}"
-    payload_on: "found"
-    payload_off: "not_found"
-    device_class: connectivity
-    icon: mdi:bluetooth
-    device:
-      identifiers: ["esptracer_device"]
-      name: "ESPTracer"
-      manufacturer: "Custom"
-      model: "LiLyGO T-SIM7000G"
-
-  # === DEVICE SLEEP / AWAKE STATUS ===
   - name: "Device Sleeping"
     unique_id: esptracer_sleeping_status
     state_topic: "esptracer/status"

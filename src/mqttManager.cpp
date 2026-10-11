@@ -5,11 +5,7 @@
 #include "state.h"
 
 // retain=true is used for topics that represent the current state of the device 
-//(e.g., location, key fob status, battery status, device status, modem status).
-
-// Added void mqttFlush() after publish, because on a cellular connection (via modem/AT),
-// packet transmission has higher latency than on Wi-Fi—without this, sleepNow() would immediately
-// proceed to gprsDisconnect() before the message had actually finished sending.
+//(e.g., location, battery status, device status, modem status).
 
 TinyGsm modem(SerialAT);
 TinyGsmClient client(modem);
@@ -76,25 +72,6 @@ void publishLocation(float lat, float lng, float alt, float speed, float accurac
   }
 }
 
-// Do not need to use cellular connection to publish key fob status, because the BLE key fob is only detected when the device is awake (during ALARM).
-void publishKeyFobStatus(bool found) {
-  // String payload = "{\"status\":\"" + String(found ? "found" : "not_found") + "\"}";
-  // if (!mqttClient.publish(MQTT_TOPIC_KEYFOB, payload.c_str(), true)) { // retained
-  //   Serial.println("⚠️  Failed to publish key fob status!");
-  // } else {
-  //   if (found) {
-  //     Serial.println("🔵 BLE key fob: found");
-  //   } else {
-  //     Serial.println("🔴 BLE key fob: not found");
-  //   }
-  // }
-  if (found) {
-    Serial.println("🔵 BLE key fob: found");
-  } else {
-    Serial.println("🔴 BLE key fob: not found");
-  }
-}
-
 void publishBatteryStatus() {
   float voltage = ReadBatteryVoltage();
   int percent = BatteryPercent(voltage);
@@ -130,11 +107,13 @@ void publishModemStatus() {
   if (!mqttClient.publish(MQTT_TOPIC_MODEM, payload.c_str(), true)) { // retained
     Serial.println("⚠️  Failed to publish modem status!");
   } else {
-    Serial.println("Modem Info: " + modemInfo);    
+    // Serial.println("Modem Info: " + modemInfo);    
     Serial.println("Signal Quality: " + signalQuality);    
   }
 }
 
+// -> It's not finished, maybe it doesn't need to exist.
+// Publish an alarm event to the MQTT topic (not retained, because we want to notify only when the event occurs)
 void publishAlarmEvent() {
   String payload = "{\"event\":\"ALARM_TRIGGERED\",\"uptime_ms\":" + String(millis()) + "}";
   if (!mqttClient.publish(MQTT_TOPIC_ALARM, payload.c_str(), false)) { // Not retained, because we want to notify only when the event occurs
@@ -144,7 +123,8 @@ void publishAlarmEvent() {
     Serial.println("🚨 Alarm event δημοσιεύτηκε: " + String(MQTT_TOPIC_ALARM));
   }
 }
- 
+
+// Publish the current device state (DISARMED, ARMED, ALARM) to the MQTT topic
 void publishStateTopic() {
   if (!mqttClient.publish(MQTT_TOPIC_STATE, stateNameOf(rtcDeviceState), true)) { // retained
     Serial.println("⚠️  Failed to publish state topic!");
@@ -175,6 +155,10 @@ int BatteryPercent(float voltage) {
   if (voltage >= 4.2) return 100;
   return (int)(((voltage - 3.4) / (4.2 - 3.4)) * 100);
 }
+
+// Added void mqttFlush() after publish, because on a cellular connection (via modem/AT),
+// packet transmission has high latency and sleepNow() would immediately
+// proceed to gprsDisconnect() before the message had actually finished sending.
 
 // Flush MQTT messages for a specified duration (default 500 ms)
 void mqttFlush(uint32_t ms) {
