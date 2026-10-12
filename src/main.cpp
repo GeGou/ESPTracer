@@ -29,6 +29,10 @@ void IRAM_ATTR onMotionISR();
 void disarmedFlow();
 void startAlarmTracking();
 void fullPowerOff();
+bool processMotionEvent(unsigned long now);
+void drivingLoop(unsigned long now);  // 
+
+static bool drivingConfirmed = false;
 
 #ifdef USE_MPU6050
 void writeMPU(uint8_t reg, uint8_t data); // MPU6050-specific (I2C)
@@ -222,8 +226,10 @@ static void powerUpConnectivity() {
     }
  
     if (attempts > 20) {
-      Serial.println("Modem still not responding after restart, restarting ESP32!");
-      ESP.restart();
+      // Serial.println("Modem still not responding after restart, restarting ESP32!");
+      // ESP.restart();
+      Serial.println("Modem still not responding after restart, going to deep sleep and will try again on next wakeup!");
+      sleepNow(); // Instead of restarting, go to deep sleep and try again on the next wakeup
     }
  
     modemOK = modem.testAT();
@@ -240,10 +246,18 @@ static void powerUpConnectivity() {
   // Connect to network
   Serial.print("Trying to connect to APN: ");
   Serial.println(APN);
+  int gprsRetries = 0;
   while (!modem.gprsConnect(APN, GPRS_USER, GPRS_PASS)) {
     Serial.println("GPRS connect failed, retrying...");
     Serial.println("signal quality: " + String(modem.getSignalQuality()));
     checkModemStatus();
+    gprsRetries++;
+    if (gprsRetries > 4) {
+      // Serial.println("GPRS connect failed after 5 attempts, restarting ESP32!");
+      // ESP.restart();
+      Serial.println("GPRS connect failed after 5 attempts, going to deep sleep and will try again on next wakeup!");
+      sleepNow(); // Instead of restarting, go to deep sleep and try again on the next
+    }
     delay(4000);
   }
  
@@ -288,14 +302,29 @@ void disarmedFlow() {
   float lat = 0, lon = 0, speed = 0, alt = 0, accuracy = 0;
   int   vsat = 0, usat = 0, year = 0, month = 0, day = 0, hour = 0, min = 0, sec = 0;
  
-  Serial.println("DISARMED: requesting one-shot location before sleep...");
-  if (modem.getGPS(&lat, &lon, &speed, &alt, &vsat,
+  Serial.println("DISARMED: requesting location before sleep...");
+  int gpsAttempts = 0;
+  while (!modem.getGPS(&lat, &lon, &speed, &alt, &vsat,
     &usat, &accuracy, &year, &month, &day, &hour, &min, &sec)) {
-    publishLocation(lat, lon, alt, speed, accuracy);
-  } else {
-    Serial.println("DISARMED: no GPS fix found, sleeping without location.");
+    Serial.println("DISARMED: waiting for GPS fix...");
+    delay(2000);
+    gpsAttempts++;
+    if (gpsAttempts >= 10) {
+      Serial.println("DISARMED: giving up on GPS fix...");
+      break;
+    }
   }
-  delay(500);
+  if (gpsAttempts < 10) {
+    publishLocation(lat, lon, alt, speed, accuracy);
+    delay(500);
+  }
+  // if (modem.getGPS(&lat, &lon, &speed, &alt, &vsat,
+  //   &usat, &accuracy, &year, &month, &day, &hour, &min, &sec)) {
+  //   publishLocation(lat, lon, alt, speed, accuracy);
+  // } else {
+  //   Serial.println("DISARMED: no GPS fix found, sleeping without location.");
+  // }
+  // delay(500);
  
   sleepNow();
 }
@@ -393,8 +422,12 @@ void setup() {
   motionEventsInWindow = 0;
 
   if (newState == STATE_DISARMED) {
-    disarmedFlow();
-    return; // It never gets here -- disarmedFlow() calls sleepNow()
+    // disarmedFlow();
+    // return; // It never gets here -- disarmedFlow() calls sleepNow()
+    Serial.println("DISARMED: key fob present, modem stays OFF until the vehicle parks.");
+    drivingConfirmed = false;
+    BLEDevice::deinit(true);  // BLE stack is no longer needed, saves power
+    return; // loop will continue, but the modem will remain OFF until the vehicle is parked (key fob leaves).
   }
  
   if (newState == STATE_ARMED) {
@@ -411,6 +444,11 @@ void setup() {
 void loop() {
   unsigned long now = millis();
   
+  if (rtcDeviceState == STATE_DISARMED) {
+    drivingLoop(now);
+    return; // nothing else to do in DISARMED state, just keep scanning for the key fob
+  }
+
   mqttClient.loop(); // It MUST be running so that the commands reach callback()
 
   // Check for commands received via MQTT_TOPIC_COMMAND
@@ -429,30 +467,13 @@ void loop() {
     return; // It never gets here
   }
 
-  // This loop() runs ONLY while rtcDeviceState == STATE_ALARM.
+  // This block runs ONLY while rtcDeviceState == STATE_ALARM.
   // Update last motion time if motion detected — with software consensus filter
   if (motionFlag) {
     motionFlag = false;
-#ifdef USE_MPU6050
-    readMPU(0x3A); // INT_STATUS: clear-on-read -- MPU6050-specific
-#endif
-    // FIX: sliding logic -- reset ONLY if there is an actual gap (>MOTION_WINDOW_MS)
-    // from the PREVIOUS event, not from the start of a fixed window. Thus, consecutive
-    // events (e.g., 1/sec due to hardware debounce) never “lose” the count due to absolute
-    // time—only an actual pause in motion triggers a reset.   
-    if (now - motionWindowStart > MOTION_WINDOW_MS) {
-      motionEventsInWindow = 1;
-    } else {
-      motionEventsInWindow++;
-    }
-    motionWindowStart = now;  // update on EVERY event, not just reset
-
-    if (motionEventsInWindow >= MOTION_CONSENSUS_COUNT) {
-      lastMotion = now; // "real" continuous motion confirmed
+    if (processMotionEvent(now)) {
+      lastMotion = now;
       Serial.println("Confirmed motion (consensus) - Timer reset.");
-    } else {
-      Serial.println("Motion event (" + String(motionEventsInWindow) + "/" +
-                      String(MOTION_CONSENSUS_COUNT) + ") - waiting for consensus.");
     }
   }
 
@@ -630,4 +651,48 @@ void sleepSilent() {
   delay(100);
   esp_deep_sleep_start();
   Serial.println("This will never be printed");
+}
+
+// Επιστρέφει true όταν επιβεβαιώνεται "πραγματική" συνεχής κίνηση.
+bool processMotionEvent(unsigned long now) {
+#ifdef USE_MPU6050
+  readMPU(0x3A); // INT_STATUS clear-on-read
+#endif
+  if (now - motionWindowStart > MOTION_WINDOW_MS) {
+    motionEventsInWindow = 1;
+  } else {
+    motionEventsInWindow++;
+  }
+  motionWindowStart = now;
+
+  if (motionEventsInWindow >= MOTION_CONSENSUS_COUNT) {
+    return true;
+  }
+  Serial.println("Motion event (" + String(motionEventsInWindow) + "/" +
+    String(MOTION_CONSENSUS_COUNT) + ") - waiting for consensus.");
+  return false;
+}
+
+// DISARMED: ο ιδιοκτήτης είναι κοντά. Modem OFF, περιμένουμε να σταματήσει η κίνηση.
+void drivingLoop(unsigned long now) {
+  if (motionFlag) {
+    motionFlag = false;
+    if (processMotionEvent(now)) {
+      lastMotion = now;
+      if (!drivingConfirmed) {
+        drivingConfirmed = true;
+        Serial.println("Driving confirmed - waiting for the vehicle to park.");
+      }
+    }
+  }
+
+  if (now - lastMotion > PARKED_TIMEOUT_MS) {
+    if (drivingConfirmed) {
+      Serial.println("Vehicle parked -> sending one useful report.");
+      disarmedFlow();   // ανοίγει modem, στέλνει status + θέση, sleepNow()
+    } else {
+      Serial.println("No real driving detected -> silent sleep, no report.");
+      sleepSilent();    // χωρίς modem
+    }
+  }
 }

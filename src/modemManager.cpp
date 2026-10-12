@@ -35,7 +35,7 @@ void checkModemStatus() {
   Serial.println(modem.getSignalQuality());
 }
 
-void GPSTurnOn(void) {
+void GPSTurnOn() {
   Serial.println("Start positioning. Make sure to locate outdoors.");
   // Enable the power to GPS
   // The antenna power switch on the T-SIM7000G board is on modem GPIO 48,
@@ -48,7 +48,7 @@ void GPSTurnOn(void) {
   modem.enableGPS();
 }
 
-void GPSTurnOff(void) {
+void GPSTurnOff() {
   // Disable GPS
   modem.disableGPS();
   // Disable the power to GPS

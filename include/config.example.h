@@ -32,3 +32,4 @@
 #define BLE_RESCAN_INTERVAL_MS 30000    // rescan keyfob during ALARM
 #define MOTION_WINDOW_MS 5000     // consensus window for motion filter
 #define MOTION_CONSENSUS_COUNT 3    // minimum events within the window
+#define PARKED_TIMEOUT_MS (3UL * 60UL * 1000UL) // 3 minutes of inactivity -> end of ALARM tracking (if no motion detected)
